@@ -1,7 +1,11 @@
 {
+  "name": "notion-widget-server1",
+  "version": "1.0.0",
+  "private": true,
+  "engines": {
+    "node": "18.x"
+  },
   "dependencies": {
-    "node-fetch": "^3.3.2"
-    "@notionhq/client": "^2.2.15",
     "cheerio": "^1.0.0-rc.12"
   }
 }
