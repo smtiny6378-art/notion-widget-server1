@@ -1,17 +1,7 @@
 // api/searchRidi.js
 const cheerio = require("cheerio");
 
-const VERSION = "searchRidi-2026-02-01-v3"; // ✅ 이게 응답에 찍히면 배포 반영 OK
-
-async function getFetch() {
-  if (typeof fetch !== "undefined") return fetch;
-  const mod = await import("node-fetch");
-  return mod.default;
-}
-
-function safeJsonParse(s) {
-  try { return JSON.parse(s); } catch { return null; }
-}
+const VERSION = "searchRidi-2026-02-01-v4-node24";
 
 function absolutizeUrl(u) {
   if (!u) return "";
@@ -23,14 +13,18 @@ function absolutizeUrl(u) {
   return url;
 }
 
+function safeJsonParse(s) {
+  try { return JSON.parse(s); } catch { return null; }
+}
+
 function extractBookId(link) {
   const m = String(link || "").match(/\/books\/(\d+)/);
   return m ? m[1] : null;
 }
 
-// ✅ 상세 페이지에서 coverUrl 뽑기 (NEXT_DATA → og:image → json-ld image 순서)
-async function fetchCoverFromDetail(fetchFn, bookLink) {
-  const r = await fetchFn(bookLink, {
+// 상세 페이지에서 coverUrl 뽑기 (NEXT_DATA → og:image → json-ld image)
+async function fetchCoverFromDetail(bookLink) {
+  const r = await fetch(bookLink, {
     headers: {
       "User-Agent": "Mozilla/5.0",
       "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -45,12 +39,11 @@ async function fetchCoverFromDetail(fetchFn, bookLink) {
   const html = await r.text();
   const $ = cheerio.load(html);
 
-  // 1) NEXT_DATA에서 image 계열 찾기
+  // 1) NEXT_DATA
   const nextText = $("#__NEXT_DATA__").first().text();
   if (nextText) {
     const next = safeJsonParse(nextText);
     if (next) {
-      // JSON 트리에서 이미지 후보 키들을 탐색
       const keys = ["coverUrl", "thumbnailUrl", "thumbnail", "imageUrl", "image", "cover"];
       let found = null;
 
@@ -67,12 +60,10 @@ async function fetchCoverFromDetail(fetchFn, bookLink) {
         if (typeof cur === "object") {
           for (const k of Object.keys(cur)) {
             const v = cur[k];
-
             if (!found && keys.includes(k) && typeof v === "string") {
               const abs = absolutizeUrl(v);
               if (abs) found = abs;
             }
-
             stack.push(v);
           }
         }
@@ -118,11 +109,9 @@ module.exports = async (req, res) => {
   if (!q) return res.status(400).json({ ok: false, error: "q is required", version: VERSION });
 
   try {
-    const fetchFn = await getFetch();
-
     // 1) 검색 페이지에서 title/link 수집
     const searchUrl = `https://ridibooks.com/search?q=${encodeURIComponent(q)}`;
-    const r = await fetchFn(searchUrl, {
+    const r = await fetch(searchUrl, {
       headers: {
         "User-Agent": "Mozilla/5.0",
         "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
@@ -162,23 +151,16 @@ module.exports = async (req, res) => {
 
     // 2) 상세 페이지에서 coverUrl 채우기 (상위 8개)
     const DETAIL_LIMIT = 8;
-    const results = [];
     const debugDetails = [];
 
-    for (let i = 0; i < top.length; i++) {
+    for (let i = 0; i < top.length && i < DETAIL_LIMIT; i++) {
       const it = top[i];
-
-      if (i < DETAIL_LIMIT) {
-        const { coverUrl, reason } = await fetchCoverFromDetail(fetchFn, it.link);
-        it.coverUrl = coverUrl || undefined;
-
-        if (debug) debugDetails.push({ i, title: it.title, reason, hasCover: Boolean(coverUrl) });
-      }
-
-      results.push(it);
+      const { coverUrl, reason } = await fetchCoverFromDetail(it.link);
+      it.coverUrl = coverUrl || undefined;
+      if (debug) debugDetails.push({ i, title: it.title, reason, hasCover: Boolean(coverUrl) });
     }
 
-    const payload = { ok: true, q, items: results, version: VERSION };
+    const payload = { ok: true, q, items: top, version: VERSION };
     if (debug) payload.debug = { detail: debugDetails };
 
     return res.status(200).json(payload);
