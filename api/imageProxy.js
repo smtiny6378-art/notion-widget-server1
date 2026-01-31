@@ -61,8 +61,21 @@ export default async function handler(req, res) {
     res.setHeader("Content-Type", contentType);
     res.setHeader("Cache-Control", "public, max-age=86400, s-maxage=86400");
     res.status(200).end(buffer);
-  } catch (err) {
-    console.error("Image proxy error:", err);
+} catch (err) {
+  console.error("Image proxy error:", err);
+  const cause = err?.cause ? {
+    name: err.cause.name,
+    code: err.cause.code,
+    message: err.cause.message
+  } : null;
+
+  res.status(500).send(
+    "Image proxy error\n\n" +
+    (err?.stack || err?.message || String(err)) +
+    "\n\ncause:\n" +
+    JSON.stringify(cause, null, 2)
+  );
+}
     if (debug) {
       res
         .status(500)
