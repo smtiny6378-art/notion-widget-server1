@@ -1,7 +1,7 @@
 // api/searchRidi.js
 const cheerio = require("cheerio");
 
-const VERSION = "searchRidi-2026-02-01-v6-details(author/rating/publisher/genre/guide/desc)";
+const VERSION = "searchRidi-2026-02-01-v7-fix-empty-items+details";
 
 function absolutizeUrl(u) {
   if (!u) return "";
@@ -111,6 +111,26 @@ function toNumberSafe(v) {
   return Number.isFinite(n) ? n : null;
 }
 
+// ✅ 검색 결과에서 제목 뽑기(alt/aria/text 다 실패하면 books/ID로 fallback)
+function pickTitle($, a, link) {
+  const alt = $(a).find("img").first().attr("alt");
+  const aria = $(a).attr("aria-label");
+  const text = $(a).text().replace(/\s+/g, " ").trim();
+
+  let title = (alt && alt.trim()) || (aria && aria.trim()) || text || "";
+  title = title.replace(/\s+/g, " ").trim();
+
+  // 너무 길면 잘라내기(검색 결과에 종종 긴 문구가 섞임)
+  if (title.length > 120) title = title.slice(0, 120);
+
+  // 전부 실패하면 bookId로라도 채워서 items가 비지 않게
+  if (!title) {
+    const id = extractBookId(link);
+    if (id) title = `RIDIBOOKS ${id}`;
+  }
+  return title;
+}
+
 async function fetchDetailAndExtract(bookLink) {
   const r = await fetch(bookLink, {
     headers: {
@@ -178,7 +198,7 @@ async function fetchDetailAndExtract(bookLink) {
     }
   }
 
-  // isAdult: 성인 대체 표지로 판별(정상 범위)
+  // isAdult: 성인 대체 표지로 판별
   const isAdult = Boolean(coverUrl && String(coverUrl).includes("cover_adult.png"));
 
   // 상세 필드들
@@ -290,27 +310,36 @@ module.exports = async (req, res) => {
     const html = await r.text();
     const $ = cheerio.load(html);
 
-    // 검색 페이지에서 제목/링크 수집
+    // ✅ 검색 페이지에서 /books/ 링크를 최대한 모은다 (q 포함 필터 제거)
     const items = [];
-    const seen = new Set();
+    const seenId = new Set();
 
     $("a[href*='/books/']").each((_, a) => {
       const href = $(a).attr("href") || "";
+      if (!href.includes("/books/")) return;
+
       const link = href.startsWith("http") ? href : `https://ridibooks.com${href}`;
-      if (seen.has(link)) return;
+      const bookId = extractBookId(link);
+      if (!bookId) return;
 
-      const alt = $(a).find("img").first().attr("alt");
-      const aria = $(a).attr("aria-label");
-      const text = $(a).text().replace(/\s+/g, " ").trim();
-      const title = (alt && alt.trim()) || (aria && aria.trim()) || text;
+      // 동일 bookId 중복 제거
+      if (seenId.has(bookId)) return;
+      seenId.add(bookId);
 
-      if (!title) return;
-      if (title.length > 80) return;
-      if (q.length >= 2 && !title.includes(q)) return;
-
-      seen.add(link);
-      items.push({ title, link, bookId: extractBookId(link) || undefined });
+      const title = pickTitle($, a, link);
+      items.push({ title, link, bookId });
     });
+
+    // ✅ 결과가 0이면: HTML 구조가 바뀐 케이스 → debug로 일부 HTML 길이/링크 수 반환
+    if (items.length === 0) {
+      return res.status(200).json({
+        ok: true,
+        q,
+        items: [],
+        version: VERSION,
+        debug: debug ? { note: "no /books/ links found", htmlLength: html.length } : undefined,
+      });
+    }
 
     const top = items.slice(0, 12);
 
@@ -325,7 +354,7 @@ module.exports = async (req, res) => {
       it.coverUrl = d.coverUrl || undefined;
       it.isAdult = Boolean(d.isAdult);
 
-      // ✅ 저장용 데이터(리스트에서 표시 안 해도 됨)
+      // 저장용 데이터(리스트 표시 안 해도 됨)
       it.description = d.description || "";
       it.guide = d.guide || "";
       it.authorName = d.authorName || "";
@@ -337,6 +366,7 @@ module.exports = async (req, res) => {
       if (debug) {
         debugDetails.push({
           i,
+          bookId: it.bookId,
           title: it.title,
           reason: d.reason,
           hasCover: Boolean(d.coverUrl),
@@ -356,7 +386,7 @@ module.exports = async (req, res) => {
       q,
       items: top,
       version: VERSION,
-      ...(debug ? { debug: { detail: debugDetails } } : {}),
+      ...(debug ? { debug: { detail: debugDetails, foundCount: items.length } } : {}),
     });
   } catch (e) {
     return res.status(500).json({ ok: false, error: e.message || String(e), version: VERSION });
