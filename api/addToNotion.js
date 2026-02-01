@@ -19,7 +19,7 @@ function normalizeArray(v) {
   return [];
 }
 
-function toRichTextChunks(value, chunkSize = 2000) {
+function toRichTextChunks(value, chunkSize = 10000) {
   const s = value == null ? "" : String(value);
   const out = [];
   for (let i = 0; i < s.length; i += chunkSize) {
