@@ -1,7 +1,7 @@
 // api/searchRidi.js
 const cheerio = require("cheerio");
 
-const VERSION = "searchRidi-2026-02-01-v5-ui+notion";
+const VERSION = "searchRidi-2026-02-01-v6-details(author/rating/publisher/genre/guide/desc)";
 
 function absolutizeUrl(u) {
   if (!u) return "";
@@ -22,7 +22,7 @@ function extractBookId(link) {
   return m ? m[1] : null;
 }
 
-// JSON 트리에서 특정 키 후보들을 찾아 첫 번째 문자열/배열/객체 값을 가져오는 도우미
+// JSON 트리에서 특정 키 후보를 찾아 첫 값을 반환(문자열/배열/객체 모두)
 function findInJson(root, keyCandidates) {
   const stack = [root];
   while (stack.length) {
@@ -51,16 +51,64 @@ function normalizeTags(tags) {
     return tags
       .map(t => (typeof t === "string" ? t.trim() : ""))
       .filter(Boolean)
-      .slice(0, 8);
+      .slice(0, 12);
   }
   if (typeof tags === "string") {
     return tags
       .split(/[,#]/)
       .map(s => s.trim())
       .filter(Boolean)
-      .slice(0, 8);
+      .slice(0, 12);
   }
   return [];
+}
+
+function normalizeText(v) {
+  if (v == null) return "";
+  return String(v).replace(/\s+/g, " ").trim();
+}
+
+function normalizePeople(v) {
+  if (!v) return "";
+  if (typeof v === "string") return normalizeText(v);
+
+  if (Array.isArray(v)) {
+    const names = v.map(x => {
+      if (typeof x === "string") return x;
+      if (x && typeof x === "object") return x.name || x.displayName || x.authorName || x.writerName || "";
+      return "";
+    }).map(normalizeText).filter(Boolean);
+    return Array.from(new Set(names)).join(", ");
+  }
+
+  if (typeof v === "object") {
+    return normalizeText(v.name || v.displayName || v.authorName || v.writerName || "");
+  }
+
+  return "";
+}
+
+function normalizeStringArray(v) {
+  if (!v) return [];
+  if (Array.isArray(v)) {
+    const out = v.map(x => {
+      if (typeof x === "string") return x;
+      if (x && typeof x === "object") return x.name || x.title || x.label || "";
+      return "";
+    }).map(s => String(s).trim()).filter(Boolean);
+    return Array.from(new Set(out)).slice(0, 12);
+  }
+  if (typeof v === "string") {
+    return v.split(/[,/|#]/g).map(s => s.trim()).filter(Boolean).slice(0, 12);
+  }
+  return [];
+}
+
+function toNumberSafe(v) {
+  if (v == null || v === "") return null;
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  const n = Number(String(v).replace(/[^\d.]/g, ""));
+  return Number.isFinite(n) ? n : null;
 }
 
 async function fetchDetailAndExtract(bookLink) {
@@ -75,7 +123,18 @@ async function fetchDetailAndExtract(bookLink) {
   });
 
   if (!r.ok) {
-    return { coverUrl: null, isAdult: false, meta: "", tags: [], reason: `detail status ${r.status}` };
+    return {
+      coverUrl: null,
+      isAdult: false,
+      description: "",
+      guide: "",
+      authorName: "",
+      publisherName: "",
+      rating: null,
+      genre: [],
+      tags: [],
+      reason: `detail status ${r.status}`,
+    };
   }
 
   const html = await r.text();
@@ -109,8 +168,8 @@ async function fetchDetailAndExtract(bookLink) {
   }
 
   if (!coverUrl) {
-    const ld = $('script[type="application/ld+json"]').first().text();
-    const j = ld ? safeJsonParse(ld) : null;
+    const ldTxt = $('script[type="application/ld+json"]').first().text();
+    const j = ldTxt ? safeJsonParse(ldTxt) : null;
     const img =
       (j && typeof j === "object" && (j.image || (j.mainEntity && j.mainEntity.image))) || null;
     if (typeof img === "string" && img) {
@@ -122,33 +181,85 @@ async function fetchDetailAndExtract(bookLink) {
   // isAdult: 성인 대체 표지로 판별(정상 범위)
   const isAdult = Boolean(coverUrl && String(coverUrl).includes("cover_adult.png"));
 
-  // meta/tags: 가능한 범위에서 NEXT_DATA / og:description / ld+json에서 추출
-  let meta = "";
+  // 상세 필드들
+  let description = "";
+  let guide = "";
+  let authorName = "";
+  let publisherName = "";
+  let rating = null;
+  let genre = [];
   let tags = [];
 
-  // og:description을 meta로 쓰기(없으면 빈 문자열)
-  const ogDesc =
-    $('meta[property="og:description"]').attr("content") ||
-    $('meta[name="description"]').attr("content") ||
-    "";
-  if (ogDesc) meta = ogDesc.replace(/\s+/g, " ").trim();
-
-  // NEXT_DATA에서 키워드/태그 후보 찾기
+  // 1) __NEXT_DATA__ 우선
   if (next) {
-    const keywordVal = findInJson(next, ["keywords", "keyword", "tags", "tagList", "hashTags", "hashtags"]);
+    const descVal = findInJson(next, [
+      "description", "bookDescription", "synopsis", "summary",
+      "intro", "introduction", "productDescription"
+    ]);
+    if (descVal) description = normalizeText(descVal);
+
+    const guideVal = findInJson(next, [
+      "romanceGuide", "romance_guide", "romanceGuideText",
+      "guide", "contentGuide"
+    ]);
+    if (guideVal) guide = normalizeText(guideVal);
+
+    const authorVal = findInJson(next, [
+      "authorName", "author", "authors", "writer", "writers",
+      "creator", "creators"
+    ]);
+    authorName = normalizePeople(authorVal);
+
+    const pubVal = findInJson(next, [
+      "publisherName", "publisher", "imprint", "brand"
+    ]);
+    publisherName = normalizeText(pubVal);
+
+    const ratingVal = findInJson(next, [
+      "averageRating", "ratingAverage", "rating", "score", "starRating"
+    ]);
+    rating = toNumberSafe(ratingVal);
+
+    const genreVal = findInJson(next, [
+      "genres", "genre", "categories", "category", "bookCategories", "classification"
+    ]);
+    genre = normalizeStringArray(genreVal);
+
+    const keywordVal = findInJson(next, [
+      "keywords", "keyword", "tags", "tagList", "hashTags", "hashtags"
+    ]);
     tags = normalizeTags(keywordVal);
   }
 
-  // ld+json keywords가 있으면 섞기
-  const ld = $('script[type="application/ld+json"]').first().text();
-  const j = ld ? safeJsonParse(ld) : null;
-  if (j && typeof j === "object" && j.keywords) {
-    const ldTags = normalizeTags(j.keywords);
-    const merged = [...tags, ...ldTags];
-    tags = Array.from(new Set(merged)).slice(0, 8);
+  // 2) description fallback (og:description은 요약)
+  if (!description) {
+    const ogDesc =
+      $('meta[property="og:description"]').attr("content") ||
+      $('meta[name="description"]').attr("content") ||
+      "";
+    if (ogDesc) description = normalizeText(ogDesc);
   }
 
-  return { coverUrl, isAdult, meta, tags, reason };
+  // 3) ld+json 보조
+  const ldTxt = $('script[type="application/ld+json"]').first().text();
+  const j = ldTxt ? safeJsonParse(ldTxt) : null;
+  if (j && typeof j === "object") {
+    if (!description && j.description) description = normalizeText(j.description);
+    if (!authorName && j.author) authorName = normalizePeople(j.author);
+    if (!publisherName && j.publisher) publisherName = normalizePeople(j.publisher);
+
+    if (rating == null && j.aggregateRating && j.aggregateRating.ratingValue) {
+      rating = toNumberSafe(j.aggregateRating.ratingValue);
+    }
+
+    if (j.keywords) {
+      const ldTags = normalizeTags(j.keywords);
+      const merged = [...tags, ...ldTags];
+      tags = Array.from(new Set(merged)).slice(0, 12);
+    }
+  }
+
+  return { coverUrl, isAdult, description, guide, authorName, publisherName, rating, genre, tags, reason };
 }
 
 module.exports = async (req, res) => {
@@ -203,18 +314,41 @@ module.exports = async (req, res) => {
 
     const top = items.slice(0, 12);
 
-    // 상세 페이지에서 cover/meta/tags 채우기 (상위 8개)
+    // 상세 페이지에서 필드 채우기 (상위 8개)
     const DETAIL_LIMIT = 8;
     const debugDetails = [];
 
     for (let i = 0; i < top.length && i < DETAIL_LIMIT; i++) {
       const it = top[i];
       const d = await fetchDetailAndExtract(it.link);
+
       it.coverUrl = d.coverUrl || undefined;
       it.isAdult = Boolean(d.isAdult);
-      it.meta = d.meta || "";
-      it.tags = d.tags || [];
-      if (debug) debugDetails.push({ i, title: it.title, reason: d.reason, hasCover: Boolean(d.coverUrl), isAdult: it.isAdult });
+
+      // ✅ 저장용 데이터(리스트에서 표시 안 해도 됨)
+      it.description = d.description || "";
+      it.guide = d.guide || "";
+      it.authorName = d.authorName || "";
+      it.publisherName = d.publisherName || "";
+      it.rating = d.rating == null ? undefined : d.rating;
+      it.genre = d.genre || [];
+      it.tags = d.tags || []; // (=키워드로 사용)
+
+      if (debug) {
+        debugDetails.push({
+          i,
+          title: it.title,
+          reason: d.reason,
+          hasCover: Boolean(d.coverUrl),
+          isAdult: it.isAdult,
+          hasDesc: Boolean(d.description),
+          hasAuthor: Boolean(d.authorName),
+          hasPublisher: Boolean(d.publisherName),
+          hasRating: d.rating != null,
+          genreCount: (d.genre || []).length,
+          tagsCount: (d.tags || []).length,
+        });
+      }
     }
 
     return res.status(200).json({
@@ -222,7 +356,7 @@ module.exports = async (req, res) => {
       q,
       items: top,
       version: VERSION,
-      ...(debug ? { debug: { detail: debugDetails } } : {})
+      ...(debug ? { debug: { detail: debugDetails } } : {}),
     });
   } catch (e) {
     return res.status(500).json({ ok: false, error: e.message || String(e), version: VERSION });
