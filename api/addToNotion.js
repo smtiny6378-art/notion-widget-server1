@@ -37,6 +37,54 @@ function toNumberSafe(v) {
   return Number.isFinite(n) ? n : null;
 }
 
+/**
+ * ✅ Multi-select 옵션이 없으면 DB에 자동 추가
+ * - propName: "장르" / "키워드"
+ * - values: ["로맨스", "현대물", ...]
+ * 반환: { added: ["..."], finalOptions: Set(...) }
+ */
+async function ensureMultiSelectOptions(databaseId, dbProps, propName, values) {
+  if (!values || values.length === 0) return { added: [], finalOptions: new Set() };
+
+  const prop = dbProps[propName];
+  if (!prop || prop.type !== "multi_select") {
+    // 속성이 없거나 타입이 아니면 아무것도 안 함
+    return { added: [], finalOptions: new Set() };
+  }
+
+  const existingOptions = prop.multi_select?.options || [];
+  const existing = new Set(existingOptions.map(o => o.name));
+
+  // 추가해야 할 옵션들(중복 제거)
+  const need = Array.from(new Set(values)).filter(v => v && !existing.has(v));
+
+  if (need.length === 0) {
+    return { added: [], finalOptions: existing };
+  }
+
+  // ✅ Notion DB 업데이트: 기존 옵션 + 신규 옵션
+  // 주의: properties[propName] 구조는 Notion API 형식에 맞춰야 함
+  const newOptions = [
+    ...existingOptions.map(o => ({ name: o.name })), // 색상은 생략해도 됨
+    ...need.map(name => ({ name })),
+  ];
+
+  await notion.databases.update({
+    database_id: databaseId,
+    properties: {
+      [propName]: {
+        multi_select: {
+          options: newOptions,
+        },
+      },
+    },
+  });
+
+  // 업데이트 후 최종 옵션 집합
+  const finalSet = new Set([...existing, ...need]);
+  return { added: need, finalOptions: finalSet };
+}
+
 module.exports = async (req, res) => {
   // CORS
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -58,7 +106,6 @@ module.exports = async (req, res) => {
   const coverUrl = body?.coverUrl?.toString().trim() || "";
   const isAdult = toBoolean(body?.isAdult);
 
-  // ✅ 저장용 필드 (searchRidi가 내려주는 key들)
   const authorName = (body?.authorName ?? body?.author ?? "").toString().trim();
   const publisherName = (body?.publisherName ?? body?.publisher ?? "").toString().trim();
   const rating = toNumberSafe(body?.rating);
@@ -66,17 +113,17 @@ module.exports = async (req, res) => {
   const genreArr = normalizeArray(body?.genre);
   const keywordsArr = normalizeArray(body?.keywords ?? body?.tags); // tags를 키워드로 사용
   const guideText = (body?.guide ?? body?.romanceGuide ?? "").toString();
-  const description = (body?.description ?? body?.meta ?? "").toString(); // meta(구버전)도 fallback
+  const description = (body?.description ?? body?.meta ?? "").toString();
 
   try {
     const databaseId = process.env.NOTION_DB_ID;
     if (!databaseId) return res.status(500).json({ error: "NOTION_DB_ID is missing" });
 
-    // ✅ DB 스키마 읽어서 multi-select 옵션 존재 여부 확인
-    const db = await notion.databases.retrieve({ database_id: databaseId });
-    const props = db?.properties || {};
+    // ✅ DB 스키마 읽기
+    let db = await notion.databases.retrieve({ database_id: databaseId });
+    let props = db?.properties || {};
 
-    // ---- 네 DB 속성명(정확히 고정) ----
+    // ---- 네 DB 속성명(고정) ----
     const TITLE_PROP = "제목";
     const URL_PROP = "url";
     const COVER_PROP = "표지";
@@ -88,22 +135,34 @@ module.exports = async (req, res) => {
     const GUIDE_PROP = "로맨스 가이드";
     const DESC_PROP = "작품 소개";
 
-    // 성인작이면 키워드에 "19" 옵션이 있을 때만 추가
+    // 성인작이면 키워드에 "19" 추가
     const keywordCandidates = isAdult ? [...keywordsArr, "19"] : keywordsArr;
 
-    const safeGenre = props[GENRE_PROP]?.type === "multi_select"
-      ? (() => {
-          const allowed = new Set((props[GENRE_PROP].multi_select.options || []).map(o => o.name));
-          return genreArr.filter(n => allowed.has(n));
-        })()
-      : [];
+    // ✅ 1) 옵션 자동 생성 (장르/키워드)
+    const createdOptions = { genre: [], keywords: [] };
 
-    const safeKeywords = props[KEYWORDS_PROP]?.type === "multi_select"
-      ? (() => {
-          const allowed = new Set((props[KEYWORDS_PROP].multi_select.options || []).map(o => o.name));
-          return keywordCandidates.filter(n => allowed.has(n));
-        })()
-      : [];
+    if (genreArr.length && props[GENRE_PROP]?.type === "multi_select") {
+      const r = await ensureMultiSelectOptions(databaseId, props, GENRE_PROP, genreArr);
+      createdOptions.genre = r.added;
+      if (r.added.length) {
+        // DB 스키마 갱신
+        db = await notion.databases.retrieve({ database_id: databaseId });
+        props = db?.properties || {};
+      }
+    }
+
+    if (keywordCandidates.length && props[KEYWORDS_PROP]?.type === "multi_select") {
+      const r = await ensureMultiSelectOptions(databaseId, props, KEYWORDS_PROP, keywordCandidates);
+      createdOptions.keywords = r.added;
+      if (r.added.length) {
+        db = await notion.databases.retrieve({ database_id: databaseId });
+        props = db?.properties || {};
+      }
+    }
+
+    // ✅ 2) 이제는 옵션이 DB에 있으니 그대로 저장 가능
+    const safeGenre = genreArr;
+    const safeKeywords = keywordCandidates;
 
     const properties = {
       [TITLE_PROP]: { title: [{ type: "text", text: { content: title.slice(0, 2000) } }] },
@@ -138,7 +197,6 @@ module.exports = async (req, res) => {
         ? { [DESC_PROP]: { rich_text: toRichTextChunks(description) } }
         : {}),
 
-      // DB 속성 "표지"(Files)에도 저장
       ...(props[COVER_PROP]?.type === "files" && coverUrl
         ? {
             [COVER_PROP]: {
@@ -150,16 +208,15 @@ module.exports = async (req, res) => {
 
     const created = await notion.pages.create({
       parent: { database_id: databaseId },
-
       // ✅ 갤러리 카드 표지: 페이지 cover
       cover: coverUrl ? { type: "external", external: { url: coverUrl } } : undefined,
-
       properties,
     });
 
     return res.status(200).json({
       ok: true,
       pageId: created.id,
+      createdOptions, // ✅ 자동 생성된 옵션 목록 (확인용)
       saved: {
         title,
         url: !!urlValue,
@@ -172,10 +229,6 @@ module.exports = async (req, res) => {
         guide: !!guideText.trim(),
         description: !!description.trim(),
         isAdult,
-      },
-      skippedBecauseOptionMissing: {
-        genre: genreArr.filter(x => !safeGenre.includes(x)),
-        keywords: keywordCandidates.filter(x => !safeKeywords.includes(x)),
       },
     });
   } catch (e) {
