@@ -36,6 +36,20 @@ function toNumberSafe(v) {
   return Number.isFinite(n) ? n : null;
 }
 
+// 후보 이름 중 DB에 존재하고 타입까지 맞으면 그 속성명 반환
+function pickPropName(props, candidates, type) {
+  for (const name of candidates) {
+    if (props[name] && (!type || props[name].type === type)) return name;
+  }
+  return null;
+}
+
+// 같은 타입의 첫 속성명(최후의 보험)
+function firstPropOfType(props, type) {
+  return Object.keys(props).find(k => props[k].type === type) || null;
+}
+
+// multi-select 옵션 없으면 자동 생성
 async function ensureMultiSelectOptions(databaseId, dbProps, propName, values) {
   if (!values || values.length === 0) return { added: [] };
 
@@ -49,7 +63,7 @@ async function ensureMultiSelectOptions(databaseId, dbProps, propName, values) {
   if (need.length === 0) return { added: [] };
 
   const newOptions = [
-    ...existingOptions.map(o => ({ name: o.name })), // color 생략 가능
+    ...existingOptions.map(o => ({ name: o.name })),
     ...need.map(name => ({ name })),
   ];
 
@@ -73,131 +87,163 @@ module.exports = async (req, res) => {
 
   let body = req.body;
   if (typeof body === "string") {
-    try { body = JSON.parse(body); } catch (e) {}
+    try { body = JSON.parse(body); } catch {}
   }
 
-  // ✅ 디버깅용(필요하면 잠깐 켜고 확인)
-  const debug = body?.debug === true;
-
   const title = body?.title?.toString().trim();
-  if (!title) return res.status(400).json({ error: "title is required" });
+  if (!title) return res.status(400).json({ ok: false, error: "title is required" });
 
   const urlValue = (body?.url ?? body?.link)?.toString?.().trim?.() || "";
   const coverUrl = body?.coverUrl?.toString().trim() || "";
   const isAdult = toBoolean(body?.isAdult);
 
-  // searchRidi(v7)가 내려주는 키 기준
   const authorName = (body?.authorName ?? "").toString().trim();
   const publisherName = (body?.publisherName ?? "").toString().trim();
   const ratingNum = toNumberSafe(body?.rating);
 
   const genreArr = normalizeArray(body?.genre);
-  const keywordsArr = normalizeArray(body?.keywords ?? body?.tags); // tags를 키워드로 사용
+  const tagsArr = normalizeArray(body?.tags); // 키워드로 저장
   const guideText = (body?.guide ?? body?.romanceGuide ?? "").toString();
   const description = (body?.description ?? body?.meta ?? "").toString();
 
   try {
     const databaseId = process.env.NOTION_DB_ID;
-    if (!databaseId) return res.status(500).json({ error: "NOTION_DB_ID is missing" });
+    if (!databaseId) return res.status(500).json({ ok: false, error: "NOTION_DB_ID is missing" });
 
     // DB 스키마 읽기
     let db = await notion.databases.retrieve({ database_id: databaseId });
     let props = db?.properties || {};
 
-    // ✅ 네 DB 속성명(고정)
-    const TITLE_PROP = "제목";
-    const URL_PROP = "url";
-    const COVER_PROP = "표지";
-    const AUTHOR_PROP = "작가명";
-    const PUBLISHER_PROP = "출판사명";
-    const RATING_PROP = "평점";
-    const GENRE_PROP = "장르";
-    const KEYWORDS_PROP = "키워드";
-    const GUIDE_PROP = "로맨스 가이드";
-    const DESC_PROP = "작품 소개";
+    // ✅ 실제 DB 속성명 자동 매핑(‘표지 1’, ‘평점 1’, ‘URL’ 같은 케이스 포함)
+    const titleProp = pickPropName(props, ["제목", "Title", "이름", "Name"], "title") || firstPropOfType(props, "title");
 
-    // 성인작이면 키워드에 19 추가
-    const keywordCandidates = isAdult ? [...keywordsArr, "19"] : keywordsArr;
+    const platformProp =
+      pickPropName(props, ["플랫폼", "Platform"], "multi_select") ||
+      null;
 
-    // ✅ 옵션 자동 생성 (장르/키워드)
-    const createdOptions = { genre: [], keywords: [] };
+    const coverProp =
+      pickPropName(props, ["표지", "표지 1", "커버", "Cover", "cover", "이미지"], "files") ||
+      firstPropOfType(props, "files");
 
-    if (genreArr.length && props[GENRE_PROP]?.type === "multi_select") {
-      const r = await ensureMultiSelectOptions(databaseId, props, GENRE_PROP, genreArr);
+    const ratingProp =
+      pickPropName(props, ["평점", "평점 1", "별점", "Rating"], "number") ||
+      firstPropOfType(props, "number");
+
+    const authorProp =
+      pickPropName(props, ["작가명", "작가", "Author"], "rich_text") ||
+      null;
+
+    const publisherProp =
+      pickPropName(props, ["출판사명", "출판사", "Publisher"], "rich_text") ||
+      null;
+
+    const genreProp =
+      pickPropName(props, ["장르", "Genre"], "multi_select") ||
+      null;
+
+    const keywordsProp =
+      pickPropName(props, ["키워드", "태그", "Keywords"], "multi_select") ||
+      null;
+
+    const urlProp =
+      pickPropName(props, ["url", "URL", "링크", "Link", "주소"], "url") ||
+      firstPropOfType(props, "url");
+
+    const guideProp =
+      pickPropName(props, ["로맨스 가이드", "가이드", "Romance Guide"], "rich_text") ||
+      null;
+
+    const descProp =
+      pickPropName(props, ["작품 소개", "작품소개", "소개", "Description"], "rich_text") ||
+      null;
+
+    if (!titleProp) {
+      return res.status(500).json({
+        ok: false,
+        error: "No Title property found in DB",
+        availableProperties: Object.keys(props),
+      });
+    }
+
+    // ✅ multi-select에 넣을 값 준비
+    // 플랫폼은 무조건 RIDI 넣기(옵션 없으면 생성)
+    const platformValues = ["RIDI"];
+
+    // 키워드는 tags + 성인일 때 '19'
+    const keywordCandidates = isAdult ? [...tagsArr, "19"] : tagsArr;
+
+    const createdOptions = { platform: [], genre: [], keywords: [] };
+
+    // 옵션 자동 생성(플랫폼/장르/키워드)
+    if (platformProp && props[platformProp]?.type === "multi_select") {
+      const r = await ensureMultiSelectOptions(databaseId, props, platformProp, platformValues);
+      createdOptions.platform = r.added;
+    }
+    if (genreProp && props[genreProp]?.type === "multi_select" && genreArr.length) {
+      const r = await ensureMultiSelectOptions(databaseId, props, genreProp, genreArr);
       createdOptions.genre = r.added;
     }
-    if (keywordCandidates.length && props[KEYWORDS_PROP]?.type === "multi_select") {
-      const r = await ensureMultiSelectOptions(databaseId, props, KEYWORDS_PROP, keywordCandidates);
+    if (keywordsProp && props[keywordsProp]?.type === "multi_select" && keywordCandidates.length) {
+      const r = await ensureMultiSelectOptions(databaseId, props, keywordsProp, keywordCandidates);
       createdOptions.keywords = r.added;
     }
 
-    // 옵션을 추가했으면 최신 스키마 다시 읽기
-    if (createdOptions.genre.length || createdOptions.keywords.length) {
+    // 옵션을 추가했으면 최신 스키마 다시 읽기(안전)
+    if (createdOptions.platform.length || createdOptions.genre.length || createdOptions.keywords.length) {
       db = await notion.databases.retrieve({ database_id: databaseId });
       props = db?.properties || {};
     }
 
-    // ✅ properties 구성: 타입이 다를 때도 가능한 fallback
+    // ✅ properties 구성
     const properties = {
-      [TITLE_PROP]: { title: [{ type: "text", text: { content: title.slice(0, 2000) } }] },
+      [titleProp]: { title: [{ type: "text", text: { content: title.slice(0, 2000) } }] },
     };
 
-    // URL
-    if (urlValue && props[URL_PROP]) {
-      if (props[URL_PROP].type === "url") properties[URL_PROP] = { url: urlValue };
-      else if (props[URL_PROP].type === "rich_text") properties[URL_PROP] = { rich_text: toRichTextChunks(urlValue) };
+    if (platformProp && props[platformProp]?.type === "multi_select") {
+      properties[platformProp] = { multi_select: platformValues.map(name => ({ name })) };
     }
 
-    // 표지(files)
-    if (coverUrl && props[COVER_PROP]?.type === "files") {
-      properties[COVER_PROP] = {
+    if (urlProp && props[urlProp]?.type === "url" && urlValue) {
+      properties[urlProp] = { url: urlValue };
+    }
+
+    if (coverProp && props[coverProp]?.type === "files" && coverUrl) {
+      properties[coverProp] = {
         files: [{ type: "external", name: "cover", external: { url: coverUrl } }],
       };
     }
 
-    // 작가명(text=rich_text)
-    if (authorName && props[AUTHOR_PROP]) {
-      if (props[AUTHOR_PROP].type === "rich_text") properties[AUTHOR_PROP] = { rich_text: toRichTextChunks(authorName) };
-      // 혹시 plain_text 타입은 없지만, 그래도 최대한 저장
+    if (ratingProp && props[ratingProp]?.type === "number" && ratingNum != null) {
+      properties[ratingProp] = { number: ratingNum };
     }
 
-    // 출판사명(text=rich_text)
-    if (publisherName && props[PUBLISHER_PROP]) {
-      if (props[PUBLISHER_PROP].type === "rich_text") properties[PUBLISHER_PROP] = { rich_text: toRichTextChunks(publisherName) };
+    if (authorProp && props[authorProp]?.type === "rich_text" && authorName) {
+      properties[authorProp] = { rich_text: toRichTextChunks(authorName) };
     }
 
-    // 평점(number) — 만약 DB에서 평점이 number가 아니면 rich_text로라도 저장
-    if (props[RATING_PROP]) {
-      if (ratingNum != null && props[RATING_PROP].type === "number") {
-        properties[RATING_PROP] = { number: ratingNum };
-      } else if (ratingNum != null && props[RATING_PROP].type === "rich_text") {
-        properties[RATING_PROP] = { rich_text: toRichTextChunks(String(ratingNum)) };
-      }
+    if (publisherProp && props[publisherProp]?.type === "rich_text" && publisherName) {
+      properties[publisherProp] = { rich_text: toRichTextChunks(publisherName) };
     }
 
-    // 장르(multi_select)
-    if (genreArr.length && props[GENRE_PROP]?.type === "multi_select") {
-      properties[GENRE_PROP] = { multi_select: genreArr.map(name => ({ name })) };
+    if (genreProp && props[genreProp]?.type === "multi_select" && genreArr.length) {
+      properties[genreProp] = { multi_select: genreArr.map(name => ({ name })) };
     }
 
-    // 키워드(multi_select)
-    if (keywordCandidates.length && props[KEYWORDS_PROP]?.type === "multi_select") {
-      properties[KEYWORDS_PROP] = { multi_select: keywordCandidates.map(name => ({ name })) };
+    if (keywordsProp && props[keywordsProp]?.type === "multi_select" && keywordCandidates.length) {
+      properties[keywordsProp] = { multi_select: keywordCandidates.map(name => ({ name })) };
     }
 
-    // 로맨스 가이드(text=rich_text)
-    if (guideText.trim() && props[GUIDE_PROP]?.type === "rich_text") {
-      properties[GUIDE_PROP] = { rich_text: toRichTextChunks(guideText) };
+    if (guideProp && props[guideProp]?.type === "rich_text" && guideText.trim()) {
+      properties[guideProp] = { rich_text: toRichTextChunks(guideText) };
     }
 
-    // 작품 소개(text=rich_text)
-    if (description.trim() && props[DESC_PROP]?.type === "rich_text") {
-      properties[DESC_PROP] = { rich_text: toRichTextChunks(description) };
+    if (descProp && props[descProp]?.type === "rich_text" && description.trim()) {
+      properties[descProp] = { rich_text: toRichTextChunks(description) };
     }
 
     const created = await notion.pages.create({
       parent: { database_id: databaseId },
-      // 갤러리 카드 표지: 페이지 cover
+      // 갤러리 카드 표지: 페이지 커버
       cover: coverUrl ? { type: "external", external: { url: coverUrl } } : undefined,
       properties,
     });
@@ -205,26 +251,13 @@ module.exports = async (req, res) => {
     return res.status(200).json({
       ok: true,
       pageId: created.id,
+      mapped: {
+        titleProp, platformProp, coverProp, ratingProp, authorProp, publisherProp,
+        genreProp, keywordsProp, urlProp, guideProp, descProp
+      },
       createdOptions,
-      received: debug
-        ? {
-            title,
-            urlValue,
-            coverUrl,
-            isAdult,
-            authorName,
-            publisherName,
-            rating: body?.rating,
-            ratingNum,
-            genreArr,
-            keywordsArr,
-            keywordCandidates,
-            guideLen: guideText?.length || 0,
-            descLen: description?.length || 0,
-          }
-        : undefined,
     });
   } catch (e) {
-    return res.status(500).json({ error: e?.message || "Unknown error", details: e?.body || null });
+    return res.status(500).json({ ok: false, error: e?.message || "Unknown error", details: e?.body || null });
   }
 };
