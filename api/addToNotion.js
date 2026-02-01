@@ -1,5 +1,4 @@
 const { Client } = require("@notionhq/client");
-
 const notion = new Client({ auth: process.env.NOTION_TOKEN });
 
 function toRichText(value) {
@@ -25,6 +24,18 @@ function toBoolean(v) {
   return false;
 }
 
+function pickPropName(props, candidates, type) {
+  for (const name of candidates) {
+    if (props[name] && (!type || props[name].type === type)) return name;
+  }
+  return null;
+}
+
+function firstPropOfType(props, type) {
+  return Object.keys(props).find(k => props[k].type === type) || null;
+}
+
+// multi-select 옵션이 DB에 없으면 에러 나는 경우가 있어: 존재하는 옵션만 넣기
 function filterToExistingMultiSelectOptions(dbProp, names) {
   const options = dbProp?.multi_select?.options || [];
   const allowed = new Set(options.map(o => o.name));
@@ -32,7 +43,7 @@ function filterToExistingMultiSelectOptions(dbProp, names) {
 }
 
 module.exports = async (req, res) => {
-  // ✅ CORS
+  // CORS
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -40,24 +51,17 @@ module.exports = async (req, res) => {
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).end();
 
-  // body 파싱
   let body = req.body;
   if (typeof body === "string") {
     try { body = JSON.parse(body); } catch (e) {}
   }
 
   const title = body?.title?.toString().trim();
-  const url = (body?.url ?? body?.link)?.toString?.().trim?.() || "";
+  const urlValue = (body?.url ?? body?.link)?.toString?.().trim?.() || "";
   const coverUrl = body?.coverUrl?.toString().trim();
   const isAdult = toBoolean(body?.isAdult);
-
-  // ✅ 지금 네 API에서는 meta가 "작품 소개 텍스트"로 내려옴
   const descriptionFromMeta = body?.meta ? String(body.meta) : "";
-
-  // ✅ tags -> 노션 "키워드" (Multi-select)
-  // + 성인작이면 키워드에 "19" 옵션이 있을 때만 추가
   const tags = normalizeArray(body?.tags);
-  const keywordCandidates = isAdult ? [...tags, "19"] : tags;
 
   if (!title) return res.status(400).json({ error: "title is required" });
 
@@ -65,39 +69,49 @@ module.exports = async (req, res) => {
     const databaseId = process.env.NOTION_DB_ID;
     if (!databaseId) return res.status(500).json({ error: "NOTION_DB_ID is missing" });
 
-    // DB 스키마 가져오기 (키워드 옵션 필터링용)
+    // ✅ DB 스키마 읽기
     const db = await notion.databases.retrieve({ database_id: databaseId });
     const props = db?.properties || {};
 
-    // 키워드 multi-select 옵션(존재하는 옵션만 넣기)
-    const safeKeywords = filterToExistingMultiSelectOptions(props["키워드"], keywordCandidates);
+    // ---- 후보 이름들(여기서 자동으로 실제 속성명을 찾음) ----
+    const titleProp = pickPropName(props, ["제목", "Title", "이름", "Name"], "title") || firstPropOfType(props, "title");
+
+    const urlProp = pickPropName(props, ["url", "URL", "링크", "Link", "주소", "Url"], "url") || firstPropOfType(props, "url");
+
+    const coverProp = pickPropName(props, ["표지", "커버", "Cover", "cover", "이미지"], "files") || firstPropOfType(props, "files");
+
+    const descProp = pickPropName(props, ["작품 소개", "설명", "소개", "Description"], "rich_text") || pickPropName(props, ["작품 소개", "설명", "소개", "Description"], "text"); // (노션 UI 'text'는 API 'rich_text')
+
+    const keywordsProp = pickPropName(props, ["키워드", "태그", "Tags", "tags", "keywords"], "multi_select") || firstPropOfType(props, "multi_select");
+
+    if (!titleProp) {
+      return res.status(500).json({
+        error: "No Title property found in DB",
+        availableProperties: Object.keys(props),
+      });
+    }
+
+    // 성인작이면 키워드에 "19" 옵션이 있을 때만 추가
+    const keywordCandidates = isAdult ? [...tags, "19"] : tags;
+    const safeKeywords = keywordsProp
+      ? filterToExistingMultiSelectOptions(props[keywordsProp], keywordCandidates)
+      : [];
 
     const properties = {
-      // 제목 (Title)
-      "제목": { title: [{ type: "text", text: { content: title.slice(0, 2000) } }] },
-
-      // url (URL)
-      ...(url ? { "url": { url } } : {}),
-
-      // 표지 (Files)
-      ...(coverUrl
+      [titleProp]: { title: [{ type: "text", text: { content: title.slice(0, 2000) } }] },
+      ...(urlProp && urlValue ? { [urlProp]: { url: urlValue } } : {}),
+      ...(coverProp && coverUrl
         ? {
-            "표지": {
-              files: [
-                { type: "external", name: "cover", external: { url: coverUrl } },
-              ],
+            [coverProp]: {
+              files: [{ type: "external", name: "cover", external: { url: coverUrl } }],
             },
           }
         : {}),
-
-      // 작품 소개 (text -> API에선 rich_text)
-      ...(descriptionFromMeta
-        ? { "작품 소개": { rich_text: toRichText(descriptionFromMeta) } }
+      ...(descProp && descriptionFromMeta
+        ? { [descProp]: { rich_text: toRichText(descriptionFromMeta) } }
         : {}),
-
-      // 키워드 (Multi-select) - DB에 있는 옵션만
-      ...(safeKeywords.length
-        ? { "키워드": { multi_select: safeKeywords.map(name => ({ name })) } }
+      ...(keywordsProp && safeKeywords.length
+        ? { [keywordsProp]: { multi_select: safeKeywords.map(name => ({ name })) } }
         : {}),
     };
 
@@ -109,22 +123,22 @@ module.exports = async (req, res) => {
     return res.status(200).json({
       ok: true,
       pageId: created.id,
-      saved: {
-        title,
-        url: !!url,
-        coverUrl: !!coverUrl,
-        description: !!descriptionFromMeta,
-        keywords: safeKeywords,
-        isAdult,
-      },
+      mappedProperties: { titleProp, urlProp, coverProp, descProp, keywordsProp },
       skippedBecauseOptionMissing: {
         keywords: keywordCandidates.filter(x => !safeKeywords.includes(x)),
       },
     });
   } catch (e) {
-    return res.status(500).json({
-      error: e?.message || "Unknown error",
-      details: e?.body || null,
-    });
+    // ✅ 디버깅 도움: DB 속성명 리스트를 같이 내려줌
+    try {
+      const db = await notion.databases.retrieve({ database_id: process.env.NOTION_DB_ID });
+      return res.status(500).json({
+        error: e?.message || "Unknown error",
+        availableProperties: Object.keys(db?.properties || {}),
+        details: e?.body || null,
+      });
+    } catch (_) {
+      return res.status(500).json({ error: e?.message || "Unknown error", details: e?.body || null });
+    }
   }
 };
