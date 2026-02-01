@@ -1,10 +1,15 @@
 const { Client } = require("@notionhq/client");
 const notion = new Client({ auth: process.env.NOTION_TOKEN });
 
-function toRichText(value) {
-  const s = value == null ? "" : String(value).trim();
-  if (!s) return [];
-  return [{ type: "text", text: { content: s.slice(0, 2000) } }];
+// ✅ 긴 텍스트를 2000자씩 쪼개서 rich_text 배열로 만들기
+function toRichTextChunks(value, chunkSize = 2000) {
+  const s = value == null ? "" : String(value);
+  const out = [];
+  for (let i = 0; i < s.length; i += chunkSize) {
+    const chunk = s.slice(i, i + chunkSize);
+    if (chunk.trim()) out.push({ type: "text", text: { content: chunk } });
+  }
+  return out;
 }
 
 function normalizeArray(v) {
@@ -74,15 +79,26 @@ module.exports = async (req, res) => {
     const props = db?.properties || {};
 
     // ---- 후보 이름들(여기서 자동으로 실제 속성명을 찾음) ----
-    const titleProp = pickPropName(props, ["제목", "Title", "이름", "Name"], "title") || firstPropOfType(props, "title");
+    const titleProp =
+      pickPropName(props, ["제목", "Title", "이름", "Name"], "title") ||
+      firstPropOfType(props, "title");
 
-    const urlProp = pickPropName(props, ["url", "URL", "링크", "Link", "주소", "Url"], "url") || firstPropOfType(props, "url");
+    const urlProp =
+      pickPropName(props, ["url", "URL", "링크", "Link", "주소", "Url"], "url") ||
+      firstPropOfType(props, "url");
 
-    const coverProp = pickPropName(props, ["표지", "커버", "Cover", "cover", "이미지"], "files") || firstPropOfType(props, "files");
+    const coverProp =
+      pickPropName(props, ["표지", "커버", "Cover", "cover", "이미지"], "files") ||
+      firstPropOfType(props, "files");
 
-    const descProp = pickPropName(props, ["작품 소개", "설명", "소개", "Description"], "rich_text") || pickPropName(props, ["작품 소개", "설명", "소개", "Description"], "text"); // (노션 UI 'text'는 API 'rich_text')
+    const descProp =
+      pickPropName(props, ["작품 소개", "설명", "소개", "Description"], "rich_text") ||
+      // 노션 UI에서 "text"로 보이는 건 API에선 rich_text
+      pickPropName(props, ["작품 소개", "설명", "소개", "Description"], "text");
 
-    const keywordsProp = pickPropName(props, ["키워드", "태그", "Tags", "tags", "keywords"], "multi_select") || firstPropOfType(props, "multi_select");
+    const keywordsProp =
+      pickPropName(props, ["키워드", "태그", "Tags", "tags", "keywords"], "multi_select") ||
+      firstPropOfType(props, "multi_select");
 
     if (!titleProp) {
       return res.status(500).json({
@@ -98,8 +114,13 @@ module.exports = async (req, res) => {
       : [];
 
     const properties = {
-      [titleProp]: { title: [{ type: "text", text: { content: title.slice(0, 2000) } }] },
+      [titleProp]: {
+        title: [{ type: "text", text: { content: title.slice(0, 2000) } }],
+      },
+
       ...(urlProp && urlValue ? { [urlProp]: { url: urlValue } } : {}),
+
+      // ✅ DB 속성(표지 Files)에도 저장 (원하면 유지)
       ...(coverProp && coverUrl
         ? {
             [coverProp]: {
@@ -107,16 +128,24 @@ module.exports = async (req, res) => {
             },
           }
         : {}),
+
+      // ✅ 작품 소개: 2000자씩 분할해서 "전체" 저장
       ...(descProp && descriptionFromMeta
-        ? { [descProp]: { rich_text: toRichText(descriptionFromMeta) } }
+        ? { [descProp]: { rich_text: toRichTextChunks(descriptionFromMeta) } }
         : {}),
+
       ...(keywordsProp && safeKeywords.length
         ? { [keywordsProp]: { multi_select: safeKeywords.map(name => ({ name })) } }
         : {}),
     };
 
+    // ✅ 갤러리 카드에서 표지로 보이게: "페이지 cover" 설정
+    // (properties 밖에 넣는 게 포인트)
     const created = await notion.pages.create({
       parent: { database_id: databaseId },
+      cover: coverUrl
+        ? { type: "external", external: { url: coverUrl } }
+        : undefined,
       properties,
     });
 
@@ -127,9 +156,11 @@ module.exports = async (req, res) => {
       skippedBecauseOptionMissing: {
         keywords: keywordCandidates.filter(x => !safeKeywords.includes(x)),
       },
+      note: {
+        galleryCardPreviewTip: "갤러리 뷰 카드 미리보기를 'Page cover'로 설정해야 표지가 카드에 보입니다.",
+      },
     });
   } catch (e) {
-    // ✅ 디버깅 도움: DB 속성명 리스트를 같이 내려줌
     try {
       const db = await notion.databases.retrieve({ database_id: process.env.NOTION_DB_ID });
       return res.status(500).json({
