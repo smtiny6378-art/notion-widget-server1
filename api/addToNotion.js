@@ -27,7 +27,7 @@ function toNumberSafe(v) {
   return Number.isFinite(n) ? n : null;
 }
 
-// ✅ rich_text를 2000자 단위로 쪼개서 "전체" 저장
+// ✅ rich_text를 2000자 단위로 쪼개서 전체 저장
 function toRichTextChunks(value, chunkSize = 2000) {
   const s = value == null ? "" : String(value);
   const out = [];
@@ -35,11 +35,9 @@ function toRichTextChunks(value, chunkSize = 2000) {
     const chunk = s.slice(i, i + chunkSize);
     if (chunk.trim()) out.push({ type: "text", text: { content: chunk } });
   }
-  // 노션 제한 안전장치(최대 100 조각)
   return out.slice(0, 100);
 }
 
-// 이름 비교 느슨하게
 function normName(s) {
   return String(s || "")
     .trim()
@@ -66,55 +64,67 @@ function findPropByNameAndType(props, nameCandidates, typeCandidates) {
   return null;
 }
 
-// ✅ select/multi_select 옵션 자동 생성
-async function ensureSelectLikeOptions(databaseId, dbProps, propName, values) {
-  if (!values || values.length === 0) return { added: [] };
+// ✅ Select 옵션 자동 생성(플랫폼/장르)
+async function ensureSelectOption(databaseId, dbProps, propName, value) {
+  if (!value) return { added: [] };
+  const prop = dbProps[propName];
+  if (!prop || prop.type !== "select") return { added: [] };
+
+  const existing = prop.select?.options || [];
+  if (existing.some(o => o.name === value)) return { added: [] };
+
+  const newOptions = [...existing.map(o => ({ name: o.name })), { name: value }];
+
+  await notion.databases.update({
+    database_id: databaseId,
+    properties: { [propName]: { select: { options: newOptions } } },
+  });
+
+  return { added: [value] };
+}
+
+// ✅ Multi-select 옵션 자동 생성(키워드)
+async function ensureMultiSelectOptions(databaseId, dbProps, propName, values) {
+  const arr = normalizeArray(values);
+  if (!arr.length) return { added: [] };
 
   const prop = dbProps[propName];
-  if (!prop) return { added: [] };
+  if (!prop || prop.type !== "multi_select") return { added: [] };
 
-  const type = prop.type;
-  if (type !== "multi_select" && type !== "select") return { added: [] };
+  const existing = prop.multi_select?.options || [];
+  const existingSet = new Set(existing.map(o => o.name));
 
-  const existingOptions =
-    type === "multi_select" ? (prop.multi_select?.options || []) : (prop.select?.options || []);
-
-  const existing = new Set(existingOptions.map(o => o.name));
-  const need = Array.from(new Set(values)).filter(v => v && !existing.has(v));
-  if (need.length === 0) return { added: [] };
+  const need = Array.from(new Set(arr)).filter(v => v && !existingSet.has(v));
+  if (!need.length) return { added: [] };
 
   const newOptions = [
-    ...existingOptions.map(o => ({ name: o.name })),
+    ...existing.map(o => ({ name: o.name })),
     ...need.map(name => ({ name })),
   ];
 
   await notion.databases.update({
     database_id: databaseId,
-    properties: {
-      [propName]:
-        type === "multi_select"
-          ? { multi_select: { options: newOptions } }
-          : { select: { options: newOptions } },
-    },
+    properties: { [propName]: { multi_select: { options: newOptions } } },
   });
 
   return { added: need };
 }
 
-function setSelectLikeValue(props, propName, values) {
+function setSelectValue(props, propName, value) {
   const prop = props[propName];
-  if (!prop) return null;
+  if (!prop || prop.type !== "select") return null;
+  if (!value) return null;
+  return { select: { name: value } };
+}
 
-  const arr = normalizeArray(values);
+function setMultiSelectValue(props, propName, values) {
+  const prop = props[propName];
+  if (!prop || prop.type !== "multi_select") return null;
+
+  const arr = Array.from(new Set(normalizeArray(values)));
   if (!arr.length) return null;
 
-  if (prop.type === "multi_select") {
-    return { multi_select: arr.map(name => ({ name })) };
-  }
-  if (prop.type === "select") {
-    return { select: { name: arr[0] } };
-  }
-  return null;
+  return { multi_select: arr.map(name => ({ name })) };
 }
 
 // ---------------- handler ----------------
@@ -146,7 +156,6 @@ module.exports = async (req, res) => {
   const genreArr = normalizeArray(body?.genre);
   const tagsArr = normalizeArray(body?.tags);
 
-  // searchRidi(v10)가 내려주는 키 이름들 반영
   const guideText = (body?.guide ?? body?.romanceGuide ?? "").toString();
   const descText = (body?.description ?? body?.meta ?? "").toString();
 
@@ -154,18 +163,17 @@ module.exports = async (req, res) => {
     const databaseId = process.env.NOTION_DB_ID;
     if (!databaseId) return res.status(500).json({ ok: false, error: "NOTION_DB_ID is missing" });
 
-    // DB 스키마 읽기
+    // 스키마 읽기
     let db = await notion.databases.retrieve({ database_id: databaseId });
     let props = db?.properties || {};
 
-    // ---- property mapping (네가 준 DB 컬럼명 기준 + 유사명도 허용) ----
+    // ---- property mapping (네 DB 이름 기준) ----
     const titleProp =
       findPropByNameAndType(props, ["제목", "title", "name", "이름"], "title") ||
       firstPropOfType(props, "title");
 
     const platformProp =
-      findPropByNameAndType(props, ["플랫폼", "platform"], ["multi_select", "select"]) ||
-      null;
+      findPropByNameAndType(props, ["플랫폼", "platform"], "select") || null;
 
     const coverProp =
       findPropByNameAndType(props, ["표지", "커버", "cover", "이미지"], "files") ||
@@ -176,32 +184,27 @@ module.exports = async (req, res) => {
       firstPropOfType(props, "number");
 
     const authorProp =
-      findPropByNameAndType(props, ["작가명", "작가", "저자", "author"], "rich_text") ||
-      null;
+      findPropByNameAndType(props, ["작가명", "작가", "저자", "author"], "rich_text") || null;
 
     const publisherProp =
-      findPropByNameAndType(props, ["출판사명", "출판사", "publisher"], "rich_text") ||
-      null;
+      findPropByNameAndType(props, ["출판사명", "출판사", "publisher"], "rich_text") || null;
 
     const genreProp =
-      findPropByNameAndType(props, ["장르", "genre"], ["multi_select", "select"]) ||
-      null;
+      findPropByNameAndType(props, ["장르", "genre"], "select") || null;
 
+    // ✅ 키워드 = multi_select
     const keywordsProp =
-      findPropByNameAndType(props, ["키워드", "태그", "keywords"], ["multi_select", "select"]) ||
-      null;
+      findPropByNameAndType(props, ["키워드", "태그", "keywords"], "multi_select") || null;
 
     const urlProp =
       findPropByNameAndType(props, ["url", "URL", "링크", "link", "주소"], "url") ||
       firstPropOfType(props, "url");
 
     const guideProp =
-      findPropByNameAndType(props, ["로맨스 가이드", "로맨스가이드", "가이드", "guide"], "rich_text") ||
-      null;
+      findPropByNameAndType(props, ["로맨스 가이드", "로맨스가이드", "가이드", "guide"], "rich_text") || null;
 
     const descProp =
-      findPropByNameAndType(props, ["작품 소개", "작품소개", "소개", "description"], "rich_text") ||
-      null;
+      findPropByNameAndType(props, ["작품 소개", "작품소개", "소개", "description"], "rich_text") || null;
 
     if (!titleProp) {
       return res.status(500).json({
@@ -211,26 +214,30 @@ module.exports = async (req, res) => {
       });
     }
 
-    // ---- select/multi_select 값 준비 ----
-    // 플랫폼은 무조건 RIDI 하나 넣기
-    const platformValues = ["RIDI"];
+    // ---- 값 결정 ----
+    const platformValue = "RIDI";           // 플랫폼은 항상 RIDI
+    const genreValue = genreArr[0] || "";   // 장르는 1개만(Select)
 
-    // 키워드: tags + (성인일 때 19 추가)
-    const keywordCandidates = isAdult ? [...tagsArr, "19"] : tagsArr;
+    // 키워드(Multi): tags + (성인일 때 19 추가)
+    const keywordValues = isAdult
+      ? Array.from(new Set([...tagsArr, "19"]))
+      : Array.from(new Set(tagsArr));
 
     // ---- 옵션 자동 생성 ----
     const createdOptions = { platform: [], genre: [], keywords: [] };
 
     if (platformProp) {
-      const r = await ensureSelectLikeOptions(databaseId, props, platformProp, platformValues);
+      const r = await ensureSelectOption(databaseId, props, platformProp, platformValue);
       createdOptions.platform = r.added;
     }
-    if (genreProp && genreArr.length) {
-      const r = await ensureSelectLikeOptions(databaseId, props, genreProp, genreArr);
+
+    if (genreProp && genreValue) {
+      const r = await ensureSelectOption(databaseId, props, genreProp, genreValue);
       createdOptions.genre = r.added;
     }
-    if (keywordsProp && keywordCandidates.length) {
-      const r = await ensureSelectLikeOptions(databaseId, props, keywordsProp, keywordCandidates);
+
+    if (keywordsProp && keywordValues.length) {
+      const r = await ensureMultiSelectOptions(databaseId, props, keywordsProp, keywordValues);
       createdOptions.keywords = r.added;
     }
 
@@ -245,60 +252,55 @@ module.exports = async (req, res) => {
       [titleProp]: { title: [{ type: "text", text: { content: title.slice(0, 2000) } }] },
     };
 
-    // 플랫폼(select/multi)
     if (platformProp) {
-      const v = setSelectLikeValue(props, platformProp, platformValues);
+      const v = setSelectValue(props, platformProp, platformValue);
       if (v) properties[platformProp] = v;
     }
 
-    // URL
     if (urlProp && props[urlProp]?.type === "url" && urlValue) {
       properties[urlProp] = { url: urlValue };
     }
 
-    // 표지(files)
     if (coverProp && props[coverProp]?.type === "files" && coverUrl) {
       properties[coverProp] = {
         files: [{ type: "external", name: "cover", external: { url: coverUrl } }],
       };
     }
 
-    // 평점(number)
     if (ratingProp && props[ratingProp]?.type === "number" && ratingNum != null) {
       properties[ratingProp] = { number: ratingNum };
     }
 
-    // 작가/출판사 (rich_text)
     if (authorProp && props[authorProp]?.type === "rich_text" && authorName) {
       properties[authorProp] = { rich_text: toRichTextChunks(authorName) };
     }
+
     if (publisherProp && props[publisherProp]?.type === "rich_text" && publisherName) {
       properties[publisherProp] = { rich_text: toRichTextChunks(publisherName) };
     }
 
-    // 장르(select/multi)
-    if (genreProp && genreArr.length) {
-      const v = setSelectLikeValue(props, genreProp, genreArr);
+    if (genreProp && genreValue) {
+      const v = setSelectValue(props, genreProp, genreValue);
       if (v) properties[genreProp] = v;
     }
 
-    // 키워드(select/multi)
-    if (keywordsProp && keywordCandidates.length) {
-      const v = setSelectLikeValue(props, keywordsProp, keywordCandidates);
+    // ✅ 키워드 multi_select
+    if (keywordsProp && keywordValues.length) {
+      const v = setMultiSelectValue(props, keywordsProp, keywordValues);
       if (v) properties[keywordsProp] = v;
     }
 
-    // 로맨스 가이드/작품 소개 (긴 텍스트 전체 저장)
     if (guideProp && props[guideProp]?.type === "rich_text" && guideText.trim()) {
       properties[guideProp] = { rich_text: toRichTextChunks(guideText) };
     }
+
     if (descProp && props[descProp]?.type === "rich_text" && descText.trim()) {
       properties[descProp] = { rich_text: toRichTextChunks(descText) };
     }
 
     const created = await notion.pages.create({
       parent: { database_id: databaseId },
-      // ✅ 갤러리 카드 미리보기는 "표지(files)"가 아니라 "페이지 커버(cover)"가 더 확실해
+      // 갤러리 커버 안정화(페이지 커버)
       cover: coverUrl ? { type: "external", external: { url: coverUrl } } : undefined,
       properties,
     });
@@ -311,6 +313,7 @@ module.exports = async (req, res) => {
         genreProp, keywordsProp, urlProp, guideProp, descProp
       },
       createdOptions,
+      usedValues: { platformValue, genreValue, keywordValues },
     });
   } catch (e) {
     return res.status(500).json({
