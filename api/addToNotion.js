@@ -2,6 +2,7 @@
 const { Client } = require("@notionhq/client");
 const notion = new Client({ auth: process.env.NOTION_TOKEN });
 
+// ---------------- helpers ----------------
 function toBoolean(v) {
   if (typeof v === "boolean") return v;
   if (typeof v === "number") return v !== 0;
@@ -19,17 +20,6 @@ function normalizeArray(v) {
   return [];
 }
 
-function toRichTextChunks(value, chunkSize = 2000) {
-  const s = value == null ? "" : String(value);
-  const out = [];
-  for (let i = 0; i < s.length; i += chunkSize) {
-    const chunk = s.slice(i, i + chunkSize);
-    if (chunk.trim()) out.push({ type: "text", text: { content: chunk } });
-  }
-  // 노션 rich_text는 최대 100개 조각 제한이 있어 안전장치
-  return out.slice(0, 100);
-}
-
 function toNumberSafe(v) {
   if (v == null || v === "") return null;
   if (typeof v === "number" && Number.isFinite(v)) return v;
@@ -37,7 +27,19 @@ function toNumberSafe(v) {
   return Number.isFinite(n) ? n : null;
 }
 
-// 이름 비교를 느슨하게(공백/대소문자/특수문자 차이 흡수)
+// ✅ rich_text를 2000자 단위로 쪼개서 "전체" 저장
+function toRichTextChunks(value, chunkSize = 2000) {
+  const s = value == null ? "" : String(value);
+  const out = [];
+  for (let i = 0; i < s.length; i += chunkSize) {
+    const chunk = s.slice(i, i + chunkSize);
+    if (chunk.trim()) out.push({ type: "text", text: { content: chunk } });
+  }
+  // 노션 제한 안전장치(최대 100 조각)
+  return out.slice(0, 100);
+}
+
+// 이름 비교 느슨하게
 function normName(s) {
   return String(s || "")
     .trim()
@@ -46,9 +48,14 @@ function normName(s) {
     .replace(/[·:：\-–—_]/g, "");
 }
 
+function firstPropOfType(props, type) {
+  return Object.keys(props).find(k => props[k]?.type === type) || null;
+}
+
 function findPropByNameAndType(props, nameCandidates, typeCandidates) {
   const candSet = new Set(nameCandidates.map(normName));
-  const typeSet = new Set(Array.isArray(typeCandidates) ? typeCandidates : [typeCandidates]);
+  const types = Array.isArray(typeCandidates) ? typeCandidates : [typeCandidates];
+  const typeSet = new Set(types);
 
   for (const key of Object.keys(props)) {
     const p = props[key];
@@ -57,10 +64,6 @@ function findPropByNameAndType(props, nameCandidates, typeCandidates) {
     if (candSet.has(normName(key))) return key;
   }
   return null;
-}
-
-function firstPropOfType(props, type) {
-  return Object.keys(props).find(k => props[k]?.type === type) || null;
 }
 
 // ✅ select/multi_select 옵션 자동 생성
@@ -98,32 +101,29 @@ async function ensureSelectLikeOptions(databaseId, dbProps, propName, values) {
   return { added: need };
 }
 
-// ✅ select/multi_select 값 설정
 function setSelectLikeValue(props, propName, values) {
   const prop = props[propName];
   if (!prop) return null;
 
+  const arr = normalizeArray(values);
+  if (!arr.length) return null;
+
   if (prop.type === "multi_select") {
-    const arr = normalizeArray(values);
-    if (!arr.length) return null;
     return { multi_select: arr.map(name => ({ name })) };
   }
-
   if (prop.type === "select") {
-    const arr = normalizeArray(values);
-    const one = arr[0];
-    if (!one) return null;
-    return { select: { name: one } };
+    return { select: { name: arr[0] } };
   }
-
   return null;
 }
 
+// ---------------- handler ----------------
 module.exports = async (req, res) => {
   // CORS
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).end();
 
@@ -145,8 +145,10 @@ module.exports = async (req, res) => {
 
   const genreArr = normalizeArray(body?.genre);
   const tagsArr = normalizeArray(body?.tags);
+
+  // searchRidi(v10)가 내려주는 키 이름들 반영
   const guideText = (body?.guide ?? body?.romanceGuide ?? "").toString();
-  const description = (body?.description ?? body?.meta ?? "").toString();
+  const descText = (body?.description ?? body?.meta ?? "").toString();
 
   try {
     const databaseId = process.env.NOTION_DB_ID;
@@ -156,7 +158,7 @@ module.exports = async (req, res) => {
     let db = await notion.databases.retrieve({ database_id: databaseId });
     let props = db?.properties || {};
 
-    // ✅ 속성명 자동 매핑(이름 조금 달라도 찾음 / select도 지원)
+    // ---- property mapping (네가 준 DB 컬럼명 기준 + 유사명도 허용) ----
     const titleProp =
       findPropByNameAndType(props, ["제목", "title", "name", "이름"], "title") ||
       firstPropOfType(props, "title");
@@ -166,15 +168,15 @@ module.exports = async (req, res) => {
       null;
 
     const coverProp =
-      findPropByNameAndType(props, ["표지", "표지1", "표지 1", "커버", "cover", "이미지"], "files") ||
+      findPropByNameAndType(props, ["표지", "커버", "cover", "이미지"], "files") ||
       firstPropOfType(props, "files");
 
     const ratingProp =
-      findPropByNameAndType(props, ["평점", "평점1", "평점 1", "rating", "별점"], "number") ||
+      findPropByNameAndType(props, ["평점", "rating", "별점"], "number") ||
       firstPropOfType(props, "number");
 
     const authorProp =
-      findPropByNameAndType(props, ["작가명", "작가", "author"], "rich_text") ||
+      findPropByNameAndType(props, ["작가명", "작가", "저자", "author"], "rich_text") ||
       null;
 
     const publisherProp =
@@ -194,11 +196,11 @@ module.exports = async (req, res) => {
       firstPropOfType(props, "url");
 
     const guideProp =
-      findPropByNameAndType(props, ["로맨스가이드", "로맨스 가이드", "가이드", "guide"], "rich_text") ||
+      findPropByNameAndType(props, ["로맨스 가이드", "로맨스가이드", "가이드", "guide"], "rich_text") ||
       null;
 
     const descProp =
-      findPropByNameAndType(props, ["작품소개", "작품 소개", "소개", "description"], "rich_text") ||
+      findPropByNameAndType(props, ["작품 소개", "작품소개", "소개", "description"], "rich_text") ||
       null;
 
     if (!titleProp) {
@@ -209,11 +211,14 @@ module.exports = async (req, res) => {
       });
     }
 
-    // ✅ 넣을 값 준비
+    // ---- select/multi_select 값 준비 ----
+    // 플랫폼은 무조건 RIDI 하나 넣기
     const platformValues = ["RIDI"];
+
+    // 키워드: tags + (성인일 때 19 추가)
     const keywordCandidates = isAdult ? [...tagsArr, "19"] : tagsArr;
 
-    // ✅ 옵션 자동 생성(select/multi_select 둘 다)
+    // ---- 옵션 자동 생성 ----
     const createdOptions = { platform: [], genre: [], keywords: [] };
 
     if (platformProp) {
@@ -229,18 +234,18 @@ module.exports = async (req, res) => {
       createdOptions.keywords = r.added;
     }
 
-    // 옵션을 추가했으면 최신 스키마 다시 읽기
+    // 옵션을 추가했으면 스키마 다시 읽기
     if (createdOptions.platform.length || createdOptions.genre.length || createdOptions.keywords.length) {
       db = await notion.databases.retrieve({ database_id: databaseId });
       props = db?.properties || {};
     }
 
-    // ✅ properties 구성
+    // ---- properties 구성 ----
     const properties = {
       [titleProp]: { title: [{ type: "text", text: { content: title.slice(0, 2000) } }] },
     };
 
-    // 플랫폼(select or multi_select)
+    // 플랫폼(select/multi)
     if (platformProp) {
       const v = setSelectLikeValue(props, platformProp, platformValues);
       if (v) properties[platformProp] = v;
@@ -263,7 +268,7 @@ module.exports = async (req, res) => {
       properties[ratingProp] = { number: ratingNum };
     }
 
-    // 작가명/출판사명
+    // 작가/출판사 (rich_text)
     if (authorProp && props[authorProp]?.type === "rich_text" && authorName) {
       properties[authorProp] = { rich_text: toRichTextChunks(authorName) };
     }
@@ -271,28 +276,29 @@ module.exports = async (req, res) => {
       properties[publisherProp] = { rich_text: toRichTextChunks(publisherName) };
     }
 
-    // 장르(select or multi_select) — 지금은 searchRidi가 genre를 못 뽑아서 비어있을 수 있음
+    // 장르(select/multi)
     if (genreProp && genreArr.length) {
       const v = setSelectLikeValue(props, genreProp, genreArr);
       if (v) properties[genreProp] = v;
     }
 
-    // 키워드(select or multi_select)
+    // 키워드(select/multi)
     if (keywordsProp && keywordCandidates.length) {
       const v = setSelectLikeValue(props, keywordsProp, keywordCandidates);
       if (v) properties[keywordsProp] = v;
     }
 
-    // 가이드/작품소개 (rich_text)
+    // 로맨스 가이드/작품 소개 (긴 텍스트 전체 저장)
     if (guideProp && props[guideProp]?.type === "rich_text" && guideText.trim()) {
       properties[guideProp] = { rich_text: toRichTextChunks(guideText) };
     }
-    if (descProp && props[descProp]?.type === "rich_text" && description.trim()) {
-      properties[descProp] = { rich_text: toRichTextChunks(description) };
+    if (descProp && props[descProp]?.type === "rich_text" && descText.trim()) {
+      properties[descProp] = { rich_text: toRichTextChunks(descText) };
     }
 
     const created = await notion.pages.create({
       parent: { database_id: databaseId },
+      // ✅ 갤러리 카드 미리보기는 "표지(files)"가 아니라 "페이지 커버(cover)"가 더 확실해
       cover: coverUrl ? { type: "external", external: { url: coverUrl } } : undefined,
       properties,
     });
@@ -307,6 +313,10 @@ module.exports = async (req, res) => {
       createdOptions,
     });
   } catch (e) {
-    return res.status(500).json({ ok: false, error: e?.message || "Unknown error", details: e?.body || null });
+    return res.status(500).json({
+      ok: false,
+      error: e?.message || "Unknown error",
+      details: e?.body || null,
+    });
   }
 };
