@@ -1,61 +1,75 @@
 // api/imageProxy.js
-export const config = { runtime: "nodejs" };
+// GET /api/imageProxy?url=https%3A%2F%2F...jpg
+// 외부 이미지를 서버가 대신 받아서 그대로 전달 (Notion 핫링크/차단 회피용)
 
-export default async function handler(req, res) {
-  // CORS
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  if (req.method === "OPTIONS") return res.status(200).end();
+const https = require("https");
+const http = require("http");
 
-  const imageUrl = req.query?.url;
+function fetchBuffer(targetUrl, maxRedirects = 5) {
+  return new Promise((resolve, reject) => {
+    const doReq = (u, left) => {
+      const urlObj = new URL(u);
+      const lib = urlObj.protocol === "http:" ? http : https;
 
-  if (!imageUrl) {
-    res.status(400).send("Missing url");
-    return;
-  }
+      const req = lib.request(
+        u,
+        {
+          method: "GET",
+          headers: {
+            "user-agent":
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+            "referer": "https://page.kakao.com/",
+          }
+        },
+        (res) => {
+          const status = res.statusCode || 0;
+          const location = res.headers?.location ? String(res.headers.location) : "";
 
-  if (!/^https?:\/\//i.test(imageUrl)) {
-    res.status(400).send("Invalid url");
-    return;
-  }
+          if ([301, 302, 303, 307, 308].includes(status) && location && left > 0) {
+            const nextUrl = new URL(location, u).toString();
+            return doReq(nextUrl, left - 1);
+          }
 
+          const chunks = [];
+          res.on("data", (c) => chunks.push(c));
+          res.on("end", () => {
+            const buf = Buffer.concat(chunks);
+            resolve({
+              status,
+              buffer: buf,
+              contentType: (res.headers["content-type"] || "application/octet-stream").toString()
+            });
+          });
+        }
+      );
+
+      req.on("error", reject);
+      req.end();
+    };
+
+    doReq(targetUrl, maxRedirects);
+  });
+}
+
+module.exports = async function handler(req, res) {
   try {
-    // Node24 fetch(undici) + 리디 CDN 대응 헤더
-    const r = await fetch(imageUrl, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Referer": "https://ridibooks.com/",
-        "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
-        "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
-      },
-      redirect: "follow",
-    });
+    const url = String(req.query.url || "").trim();
+    if (!url) return res.status(400).send("Missing url");
 
-    if (!r.ok) {
-      const msg = `Upstream fetch failed: ${r.status}`;
-      res.status(502).send(msg);
-      return;
+    // 기본적인 안전장치: 너무 긴 URL 차단
+    if (url.length > 2000) return res.status(400).send("URL too long");
+
+    const fetched = await fetchBuffer(url, 6);
+    if (!fetched.status || fetched.status < 200 || fetched.status >= 300) {
+      return res.status(502).send("Upstream image error");
     }
 
-    const contentType = r.headers.get("content-type") || "image/jpeg";
-    const arrayBuffer = await r.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-
-    res.setHeader("Content-Type", contentType);
-
-    // 캐시 (속도 개선)
-    res.setHeader("Cache-Control", "public, max-age=86400, s-maxage=86400");
-
-    res.status(200).end(buffer);
-  } catch (err) {
-    console.error("imageProxy error:", err, err?.cause);
-    // 디버그용으로 원인까지 보여주기
-    const cause = err?.cause
-      ? `${err.cause.name || ""} ${err.cause.code || ""} ${err.cause.message || ""}`
-      : "";
-
-    res.status(500).send(`image proxy error\n${String(err)}\n${cause}`);
+    // 캐시(노션이 재요청 덜 하게)
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.setHeader("Content-Type", fetched.contentType);
+    return res.status(200).send(fetched.buffer);
+  } catch (e) {
+    return res.status(500).send("Proxy error");
   }
-}
+};
