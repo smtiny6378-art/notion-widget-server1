@@ -1,8 +1,7 @@
 // api/kakaopage-search.js
 // GET /api/kakaopage-search?q=검색어
-// 결과에 contentType: "webtoon" | "novel" | "unknown" 붙여서 내려줌
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -16,7 +15,6 @@ export default async function handler(req, res) {
   try {
     const url = "https://page.kakao.com/graphql";
 
-    // NOTE: 카카오페이지는 내부적으로 GraphQL을 사용하며, 필드가 바뀌면 수정이 필요할 수 있어요.
     const query = `
       query SearchKeyword($input: SearchKeywordInput!) {
         searchKeyword(searchKeywordInput: $input) {
@@ -31,23 +29,17 @@ export default async function handler(req, res) {
             scheme
             eventLog { eventMeta { series_id } }
           }
-          total
-          isEnd
-          keyword
-          page
         }
       }
     `;
 
-    // ✅ "웹툰/웹소설 둘 다"를 위해 categoryUid 같은 강한 필터는 일단 빼고 "전체 검색"으로 받습니다.
-    // (나중에 원하면: 웹툰/웹소설 별로 upstream 필터도 추가 가능)
     const variables = {
       input: {
         page: 1,
         sortType: "Latest",
         keyword: q,
-        showOnlyComplete: false,
-      },
+        showOnlyComplete: false
+      }
     };
 
     const r = await fetch(url, {
@@ -58,28 +50,26 @@ export default async function handler(req, res) {
 
     if (!r.ok) {
       const text = await r.text();
-      return res.status(502).json({ ok: false, error: "KakaoPage upstream error", detail: text.slice(0, 500) });
+      return res.status(502).json({
+        ok: false,
+        error: "KakaoPage upstream error",
+        detail: text.slice(0, 500),
+      });
     }
 
     const data = await r.json();
-    const list = data?.data?.searchKeyword?.list || [];
+    const list = (data && data.data && data.data.searchKeyword && data.data.searchKeyword.list) ? data.data.searchKeyword.list : [];
 
     const detectContentType = (it) => {
-      // metaList / row2 안에 "웹툰/웹소설" 단서가 섞여 있는 경우가 많아서 휴리스틱으로 판별
       const meta = []
         .concat(Array.isArray(it?.row3?.metaList) ? it.row3.metaList : [])
         .concat(Array.isArray(it?.row2) ? it.row2 : [])
         .filter(Boolean)
-        .map((v) => String(v).toLowerCase());
+        .map(v => String(v).toLowerCase());
 
       const joined = meta.join(" ");
-
-      // 최대한 무해하게: "웹툰/만화" 단서가 있으면 webtoon
       if (joined.includes("웹툰") || joined.includes("만화")) return "webtoon";
-
-      // "웹소설/소설" 단서가 있으면 novel
       if (joined.includes("웹소설") || joined.includes("소설")) return "novel";
-
       return "unknown";
     };
 
@@ -91,7 +81,6 @@ export default async function handler(req, res) {
       const author = row2[1] || "";
 
       const link = seriesId ? `https://page.kakao.com/content/${seriesId}` : (it?.scheme || "");
-
       const contentType = detectContentType(it);
 
       return {
@@ -104,7 +93,7 @@ export default async function handler(req, res) {
         ageGrade: it?.ageGrade ?? null,
         meta: it?.row3?.metaList || [],
         seriesId: seriesId || "",
-        contentType, // ✅ "webtoon" | "novel" | "unknown"
+        contentType,
       };
     });
 
@@ -112,4 +101,4 @@ export default async function handler(req, res) {
   } catch (e) {
     return res.status(500).json({ ok: false, error: e?.message || "Unknown error" });
   }
-}
+};
