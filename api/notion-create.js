@@ -1,3 +1,13 @@
+// api/notion-create.js
+// POST /api/notion-create
+// body: { platform, url }
+// - 카카오페이지 작품 페이지에서 og:title/og:image/og:description 시도
+// - 노션 저장 시:
+//   1) DB 속성 '표지(files)' 채움
+//   2) 페이지 cover 설정 (갤러리 '페이지 커버'에서 보임)
+//   3) 페이지 본문 첫 블록에 이미지 삽입 (갤러리 '페이지 콘텐츠'에서 보임)
+// - 외부 이미지가 노션에서 안 뜨는 경우가 많아 imageProxy로 감쌈
+
 const https = require("https");
 const zlib = require("zlib");
 
@@ -13,7 +23,7 @@ function decodeMaybeCompressed(buffer, encoding) {
 
 function getHtmlFollow(url, maxRedirects = 6) {
   return new Promise((resolve, reject) => {
-    const doReq = (currentUrl, left, redirected) => {
+    const doReq = (currentUrl, left) => {
       const u = new URL(currentUrl);
 
       const req = https.request(
@@ -36,7 +46,7 @@ function getHtmlFollow(url, maxRedirects = 6) {
 
           if ([301, 302, 303, 307, 308].includes(status) && location && left > 0) {
             const nextUrl = new URL(location, currentUrl).toString();
-            return doReq(nextUrl, left - 1, true);
+            return doReq(nextUrl, left - 1);
           }
 
           const chunks = [];
@@ -45,7 +55,7 @@ function getHtmlFollow(url, maxRedirects = 6) {
             const buf = Buffer.concat(chunks);
             const enc = res.headers?.["content-encoding"] || "";
             const html = decodeMaybeCompressed(buf, enc);
-            resolve({ status, finalUrl: currentUrl, redirected, html: html || "" });
+            resolve({ status, html: html || "" });
           });
         }
       );
@@ -54,7 +64,7 @@ function getHtmlFollow(url, maxRedirects = 6) {
       req.end();
     };
 
-    doReq(url, maxRedirects, false);
+    doReq(url, maxRedirects);
   });
 }
 
@@ -92,6 +102,13 @@ function extractContentId(url) {
   }
 }
 
+function getBaseUrl(req) {
+  // Vercel에서 현재 도메인 기준으로 프록시 URL 만들기
+  const proto = (req.headers["x-forwarded-proto"] || "https").toString();
+  const host = (req.headers["x-forwarded-host"] || req.headers.host || "").toString();
+  return `${proto}://${host}`;
+}
+
 module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
@@ -115,12 +132,12 @@ module.exports = async function handler(req, res) {
 
     const contentId = extractContentId(url);
 
-    // ✅ 작품 페이지 메타 시도
+    // 1) 카카오페이지 HTML에서 OG 추출 시도
     let ogTitle = "";
     let ogImage = "";
     let ogDesc = "";
-    const upstream = await getHtmlFollow(url, 6);
 
+    const upstream = await getHtmlFollow(url, 6);
     if (upstream.status >= 200 && upstream.status < 300) {
       const html = upstream.html || "";
       ogTitle = pickMeta(html, "og:title");
@@ -128,16 +145,24 @@ module.exports = async function handler(req, res) {
       ogDesc  = pickMeta(html, "og:description") || pickNameDesc(html);
     }
 
-    // fallback
+    // 2) fallback 값
     const title = ogTitle || (contentId ? `카카오페이지 작품 (${contentId})` : "카카오페이지 작품");
-    const coverUrl = ogImage || "";
+    const rawCoverUrl = ogImage || "";
     const desc =
       (ogDesc ? `${ogDesc}\n\n` : "") +
       `카카오페이지 링크: ${url}\n` +
       (contentId ? `작품 ID: ${contentId}\n` : "") +
       `저장 시각: ${new Date().toISOString()}`;
 
-    // ✅ 네 DB 속성명 그대로
+    // ✅ 노션이 외부 이미지 핫링크를 못 불러오는 경우가 있어서 프록시로 감쌈
+    // imageProxy가 이미 있으면 그 엔드포인트를 활용하면 되고,
+    // 없으면 아래 2번 파일(imageProxy.js)도 추가/교체해줘.
+    const baseUrl = getBaseUrl(req);
+    const proxiedCoverUrl = rawCoverUrl
+      ? `${baseUrl}/api/imageProxy?url=${encodeURIComponent(rawCoverUrl)}`
+      : "";
+
+    // 3) Notion properties (네 속성명)
     const properties = {
       "제목": { title: [{ text: { content: title } }] },
       "플랫폼": { select: { name: platform } },
@@ -145,13 +170,33 @@ module.exports = async function handler(req, res) {
       "작품 소개": { rich_text: [{ text: { content: desc } }] },
     };
 
-    if (coverUrl) {
+    // DB 속성 "표지(files)"에 넣기
+    if (proxiedCoverUrl) {
       properties["표지"] = {
-        files: [{ name: "cover", type: "external", external: { url: coverUrl } }]
+        files: [{ name: "cover", type: "external", external: { url: proxiedCoverUrl } }]
       };
     }
 
-    const payload = { parent: { database_id: NOTION_DB_ID }, properties };
+    // 페이지 커버(갤러리 카드에서 '페이지 커버'로 보임)
+    const pageCover = proxiedCoverUrl
+      ? { type: "external", external: { url: proxiedCoverUrl } }
+      : undefined;
+
+    // 페이지 본문 첫 이미지(갤러리 카드에서 '페이지 콘텐츠'로 보임)
+    const children = proxiedCoverUrl
+      ? [{
+          object: "block",
+          type: "image",
+          image: { type: "external", external: { url: proxiedCoverUrl } }
+        }]
+      : [];
+
+    const payload = {
+      parent: { database_id: NOTION_DB_ID },
+      properties,
+      ...(pageCover ? { cover: pageCover } : {}),
+      ...(children.length ? { children } : {})
+    };
 
     const r = await fetch("https://api.notion.com/v1/pages", {
       method: "POST",
@@ -169,13 +214,8 @@ module.exports = async function handler(req, res) {
     return res.status(200).json({
       ok: true,
       pageId: data.id,
-      debug: {
-        upstreamStatus: upstream.status,
-        finalUrl: upstream.finalUrl,
-        redirectedTo: upstream.redirected,
-        scrapedTitle: !!ogTitle,
-        scrapedCover: !!coverUrl
-      }
+      scraped: { title: !!ogTitle, cover: !!rawCoverUrl, desc: !!ogDesc },
+      usedProxyCover: !!proxiedCoverUrl
     });
   } catch (e) {
     return res.status(500).json({ ok: false, error: e?.message || "Unknown error" });
