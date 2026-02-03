@@ -1,0 +1,443 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>KakaoWebtoon → Notion</title>
+  <style>
+    :root{
+      --bg:#0b0b0c;
+      --line: rgba(255,255,255,.10);
+      --line2: rgba(255,255,255,.16);
+      --text:#f2f2f3;
+      --muted:#a9a9b2;
+      --muted2:#7f7f88;
+      --accent:#ffe400;
+      --ok:#9be59b;
+      --err:#ff9a9a;
+    }
+    *{ box-sizing:border-box; }
+    body{
+      margin:0;
+      background:transparent;
+      color:var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+    }
+    .wrap{
+      width:100%;
+      max-width: 760px;
+      margin: 0 auto;
+      padding: 14px;
+      background: var(--bg);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+    }
+    .top{
+      display:flex;
+      gap:12px;
+      align-items:center;
+      padding: 12px;
+      background: rgba(255,255,255,.03);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+    }
+    .logo{
+      width:42px;height:42px;
+      border-radius: 14px;
+      background: var(--accent);
+      color:#111;
+      display:grid;
+      place-items:center;
+      font-weight:900;
+      letter-spacing:.2px;
+      flex:0 0 auto;
+    }
+    .title{ font-weight:900; font-size:15px; line-height:1.2; }
+    .sub{ margin-top:4px; color:var(--muted); font-size:12px; line-height:1.35; }
+
+    .section{
+      margin-top: 12px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: rgba(255,255,255,.02);
+    }
+    .sec-title{
+      font-weight:900;
+      font-size:13px;
+      margin-bottom: 10px;
+      display:flex;
+      justify-content:space-between;
+      gap:10px;
+      align-items:center;
+      color: rgba(255,255,255,.92);
+    }
+    .sec-title span{ color:var(--muted); font-weight:700; font-size:12px; }
+
+    .row{ display:flex; gap:10px; flex-wrap:wrap; }
+    .field{ flex:1 1 220px; display:flex; flex-direction:column; gap:8px; }
+    label{ font-size:12px; color:var(--muted); }
+
+    input, textarea{
+      width: 100%;
+      padding: 11px 12px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.04);
+      font-size: 14px;
+      color: var(--text);
+      outline: none;
+    }
+    input::placeholder, textarea::placeholder{ color: rgba(255,255,255,.35); }
+    textarea{
+      min-height: 120px;
+      resize: vertical;
+      line-height: 1.45;
+      white-space: pre-wrap;
+    }
+
+    .btns{ display:flex; gap:10px; flex-wrap:wrap; margin-top: 10px; }
+    button{
+      cursor:pointer;
+      padding: 11px 12px;
+      border-radius: 14px;
+      border: 1px solid var(--line2);
+      background: rgba(255,255,255,.08);
+      font-size: 13px;
+      font-weight: 800;
+      color: var(--text);
+    }
+    button:hover{ background: rgba(255,255,255,.12); }
+    .primary{
+      background: rgba(255, 228, 0, .18);
+      border-color: rgba(255, 228, 0, .35);
+    }
+    .primary:hover{ background: rgba(255, 228, 0, .24); }
+
+    .hint{
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .hint code{
+      background: rgba(255,255,255,.06);
+      border: 1px solid var(--line);
+      padding: 2px 6px;
+      border-radius: 8px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size: 11px;
+    }
+
+    .toast{
+      margin-top: 12px;
+      padding: 10px 12px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.03);
+      color: var(--muted);
+      font-size: 12px;
+      min-height: 40px;
+      display:flex;
+      align-items:center;
+      white-space: pre-wrap;
+    }
+    .ok{ color: var(--ok); }
+    .err{ color: var(--err); }
+
+    .preview{
+      display:flex;
+      gap:12px;
+      align-items:flex-start;
+    }
+    .cover{
+      width: 96px;
+      height: 128px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.03);
+      overflow:hidden;
+      flex:0 0 auto;
+      display:grid;
+      place-items:center;
+      color: var(--muted2);
+      font-size: 12px;
+    }
+    .cover img{
+      width:100%;
+      height:100%;
+      object-fit: cover;
+      display:block;
+    }
+    .meta{
+      flex:1 1 auto;
+      min-width: 220px;
+    }
+    .meta .k{
+      font-size:12px;
+      color: var(--muted);
+      margin-top: 6px;
+    }
+    .meta .v{
+      font-size: 13px;
+      margin-top: 3px;
+      color: rgba(255,255,255,.92);
+      word-break: break-word;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <div class="logo">KW</div>
+      <div>
+        <div class="title">카카오웹툰 → 노션 저장</div>
+        <div class="sub">
+          1) 작품 URL 붙여넣기 → 2) 미리보기(자동추출) → 3) 저장
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="sec-title">
+        <div>1) 검색 열기</div>
+        <span>새 탭</span>
+      </div>
+      <div class="row">
+        <div class="field">
+          <label for="kw">검색어</label>
+          <input id="kw" placeholder="예: 악녀의 문구점" />
+        </div>
+      </div>
+      <div class="btns">
+        <button class="primary" id="openSearch">카카오웹툰 검색 열기</button>
+        <button id="openHome">카카오웹툰 홈</button>
+      </div>
+      <div class="hint">
+        작품 URL 예시: <code>https://webtoon.kakao.com/content/작품명/숫자</code>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="sec-title">
+        <div>2) 작품 URL</div>
+        <span>미리보기로 자동 채우기</span>
+      </div>
+
+      <div class="row">
+        <div class="field" style="flex-basis: 520px;">
+          <label for="url">카카오웹툰 작품 URL</label>
+          <input id="url" placeholder="https://webtoon.kakao.com/content/.../3802" />
+        </div>
+      </div>
+
+      <div class="btns">
+        <button class="primary" id="btnPreview">미리보기(자동 추출)</button>
+        <button id="btnOpen">작품 페이지 열기</button>
+        <button id="btnClear">지우기</button>
+      </div>
+
+      <div class="hint">
+        ※ <code>?tab=profile</code> 같은 뒤의 파라미터는 있어도 괜찮아요.
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="sec-title">
+        <div>3) 미리보기 & 수정(선택)</div>
+        <span>수정 후 저장 가능</span>
+      </div>
+
+      <div class="preview" style="margin-bottom: 12px;">
+        <div class="cover" id="coverBox"><span>표지</span></div>
+        <div class="meta">
+          <div class="k">제목</div>
+          <div class="v" id="pvTitle">-</div>
+          <div class="k">작가</div>
+          <div class="v" id="pvAuthor">-</div>
+          <div class="k">장르</div>
+          <div class="v" id="pvGenre">-</div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="field">
+          <label for="title">작품명(선택 수정)</label>
+          <input id="title" placeholder="자동 추출됨" />
+        </div>
+        <div class="field">
+          <label for="author">작가명(선택 수정)</label>
+          <input id="author" placeholder="자동 추출됨(비어있을 수 있어요)" />
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="field">
+          <label for="genre">장르(선택 수정)</label>
+          <input id="genre" placeholder="자동 추출됨(비어있을 수 있어요)" />
+        </div>
+        <div class="field">
+          <label for="coverUrl">표지 URL(선택 수정)</label>
+          <input id="coverUrl" placeholder="자동 추출됨(비어있을 수 있어요)" />
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="field" style="flex-basis: 100%;">
+          <label for="desc">작품 소개(선택 수정)</label>
+          <textarea id="desc" placeholder="자동 추출됨(비어있을 수 있어요)"></textarea>
+        </div>
+      </div>
+
+      <div class="btns">
+        <button class="primary" id="btnSave">노션에 저장</button>
+      </div>
+
+      <div class="hint">
+        저장은 <code>/api/notion-create</code>를 사용해요 (플랫폼=카카오웹툰).<br/>
+        ※ 키워드/출판사명은 페이지에 없는 경우가 많아 자동 추출이 어려워요.
+      </div>
+    </div>
+
+    <div class="toast" id="toast">URL을 붙여넣고 “미리보기”를 눌러 보세요.</div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    function setToast(msg, cls=""){
+      const el = $("toast");
+      el.className = "toast " + cls;
+      el.textContent = msg || "";
+    }
+
+    function openNew(url){
+      window.open(url, "_blank");
+    }
+
+    function setCover(url){
+      const box = $("coverBox");
+      box.innerHTML = "";
+      if(!url){
+        box.textContent = "표지";
+        return;
+      }
+      const img = document.createElement("img");
+      img.src = url;
+      img.alt = "cover";
+      img.onload = () => {};
+      img.onerror = () => { box.textContent = "표지 로드 실패"; };
+      box.appendChild(img);
+    }
+
+    function isWebtoonUrl(url){
+      try{
+        const u = new URL(url);
+        return u.hostname.includes("webtoon.kakao.com") && u.pathname.includes("/content/");
+      }catch{ return false; }
+    }
+
+    async function postJson(path, payload){
+      const r = await fetch(path, {
+        method: "POST",
+        headers: { "content-type":"application/json" },
+        body: JSON.stringify(payload)
+      });
+      const text = await r.text();
+      let data;
+      try{ data = JSON.parse(text); }
+      catch{ data = { ok:false, error:"Non-JSON response", detail:text.slice(0,200) }; }
+      return { status: r.status, data };
+    }
+
+    // Search buttons
+    $("openSearch").addEventListener("click", () => {
+      const kw = $("kw").value.trim();
+      if(!kw) return setToast("검색어를 입력해 주세요.", "err");
+      openNew("https://webtoon.kakao.com/search?keyword=" + encodeURIComponent(kw));
+      setToast("새 탭에서 검색 후 작품 상세 페이지 URL을 복사해 붙여넣어 주세요.");
+    });
+
+    $("openHome").addEventListener("click", () => {
+      openNew("https://webtoon.kakao.com/");
+      setToast("새 탭으로 홈을 열었어요.");
+    });
+
+    $("btnOpen").addEventListener("click", () => {
+      const url = $("url").value.trim();
+      if(!url) return setToast("먼저 URL을 붙여넣어 주세요.", "err");
+      openNew(url);
+    });
+
+    $("btnClear").addEventListener("click", () => {
+      $("url").value = "";
+      $("title").value = "";
+      $("author").value = "";
+      $("genre").value = "";
+      $("coverUrl").value = "";
+      $("desc").value = "";
+      $("pvTitle").textContent = "-";
+      $("pvAuthor").textContent = "-";
+      $("pvGenre").textContent = "-";
+      setCover("");
+      setToast("지웠어요.");
+    });
+
+    // Preview
+    $("btnPreview").addEventListener("click", async () => {
+      const url = $("url").value.trim();
+      if(!url) return setToast("URL을 붙여넣어 주세요.", "err");
+      if(!isWebtoonUrl(url)) return setToast("카카오웹툰 작품 URL이 맞는지 확인해 주세요. (webtoon.kakao.com/content/...)", "err");
+
+      setToast("미리보기 불러오는 중…");
+      const res = await postJson("/api/webtoon-parse", { url });
+
+      if(!res.data || !res.data.ok){
+        return setToast(`미리보기 실패: ${res.data?.error || "unknown"}`, "err");
+      }
+
+      const { title, author, genre, coverUrl, desc } = res.data;
+
+      // Fill editable fields
+      $("title").value = title || "";
+      $("author").value = author || "";
+      $("genre").value = genre || "";
+      $("coverUrl").value = coverUrl || "";
+      $("desc").value = desc || "";
+
+      // Preview cards
+      $("pvTitle").textContent = title || "(제목 없음)";
+      $("pvAuthor").textContent = author || "-";
+      $("pvGenre").textContent = genre || "-";
+      setCover(coverUrl || "");
+
+      setToast("미리보기 완료! 필요하면 수정하고 저장해 주세요.", "ok");
+    });
+
+    // Save
+    $("btnSave").addEventListener("click", async () => {
+      const url = $("url").value.trim();
+      if(!url) return setToast("URL을 붙여넣어 주세요.", "err");
+
+      const payload = {
+        platform: "카카오웹툰",
+        url,
+        title: $("title").value.trim(),
+        author: $("author").value.trim(),
+        genre: $("genre").value.trim(),
+        coverUrl: $("coverUrl").value.trim(),
+        desc: $("desc").value || ""
+      };
+
+      setToast("노션에 저장 중…");
+      const res = await postJson("/api/notion-create", payload);
+
+      if(res.data && res.data.ok){
+        setToast(`저장 완료! (pageId: ${res.data.pageId})`, "ok");
+      } else {
+        setToast(`저장 실패: ${res.data?.error || "unknown"}`, "err");
+      }
+    });
+  </script>
+</body>
+</html>
