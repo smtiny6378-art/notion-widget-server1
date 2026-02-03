@@ -7,12 +7,10 @@
   <style>
     :root{
       --bg:#0b0b0c;
-      --panel:#121214;
       --line: rgba(255,255,255,.10);
       --line2: rgba(255,255,255,.14);
       --text:#f2f2f3;
       --muted:#a9a9b2;
-      --muted2:#8b8b94;
       --accent:#ffe400;
       --ok:#9be59b;
       --err:#ff9a9a;
@@ -55,7 +53,6 @@
     }
     .title{ font-weight:900; font-size:15px; line-height:1.2; }
     .sub{ margin-top:4px; color:var(--muted); font-size:12px; line-height:1.35; }
-
     .section{
       margin-top: 12px;
       padding: 12px;
@@ -87,7 +84,6 @@
       color: var(--text);
     }
     input::placeholder{ color: rgba(255,255,255,.35); }
-
     .btns{ display:flex; gap:10px; flex-wrap:wrap; margin-top: 10px; }
     button{
       all:unset;
@@ -106,7 +102,6 @@
       border-color: rgba(255, 228, 0, .35);
     }
     .primary:hover{ background: rgba(255, 228, 0, .24); }
-
     .hint{
       margin-top: 10px;
       color: var(--muted);
@@ -121,14 +116,13 @@
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
       font-size: 11px;
     }
-
     .toast{
       margin-top: 12px;
       padding: 10px 12px;
       border-radius: 14px;
       border: 1px solid var(--line);
       background: rgba(255,255,255,.03);
-      color: var(--muted);
+      color:var(--muted);
       font-size: 12px;
       min-height: 40px;
       display:flex;
@@ -170,7 +164,7 @@
       </div>
 
       <div class="hint">
-        ✅ 검색 결과는 이 주소로 열려요: <code>https://page.kakao.com/search/result?keyword=검색어</code><br/>
+        ✅ 검색 결과 URL: <code>https://page.kakao.com/search/result?keyword=검색어</code><br/>
         작품 URL 예시: <code>https://page.kakao.com/content/65171279</code>
       </div>
     </div>
@@ -178,11 +172,11 @@
     <div class="section">
       <div class="sec-title">
         <div>2) 작품 URL 붙여넣고 저장</div>
-        <span>제목/표지 자동 채우기 지원</span>
+        <span>제목/표지 자동 채우기 시도</span>
       </div>
 
       <div class="row">
-        <div class="field" style="flex-basis: 420px;">
+        <div class="field" style="flex-basis: 520px;">
           <label for="contentUrl">카카오페이지 작품 URL</label>
           <input id="contentUrl" placeholder="예: https://page.kakao.com/content/65171279" />
         </div>
@@ -195,7 +189,8 @@
       </div>
 
       <div class="hint">
-        저장 시 서버가 작품 페이지의 메타(제목/표지/소개)를 최대한 가져와서 노션 속성에 채워요.
+        저장 시 서버가 작품 페이지 메타(제목/표지/소개)를 가져오려 시도하고,<br/>
+        만약 카카오가 서버 접근을 막으면(302) URL 기반으로만 저장돼요.
       </div>
     </div>
 
@@ -219,10 +214,10 @@
       const keyword = $("keyword").value.trim();
       if(!keyword) return setToast("검색어를 입력해 주세요.", "err");
 
-      // ✅ 실제 검색 결과 URL
+      // ✅ 검증된 검색 결과 페이지
       const url = "https://page.kakao.com/search/result?keyword=" + encodeURIComponent(keyword);
       openInNewTab(url);
-      setToast("새 탭으로 검색 결과를 열었어요. 작품 상세 페이지로 들어간 뒤 URL을 복사해 붙여넣어 주세요.");
+      setToast("새 탭으로 검색 결과를 열었어요. 작품 상세 URL을 복사해 아래에 붙여넣어 주세요.");
     });
 
     $("openHome").addEventListener("click", () => {
@@ -263,14 +258,13 @@
 
       setToast("노션에 저장 중…");
 
-      const payload = {
-        platform: "카카오페이지",
-        url
-      };
-
-      const res = await postJson("/api/notion-create", payload);
+      const res = await postJson("/api/notion-create", { platform: "카카오페이지", url });
       if (res.data && res.data.ok){
-        setToast(`저장 완료! (pageId: ${res.data.pageId})`, "ok");
+        // debug도 보여줌
+        const dbg = res.data.debug
+          ? ` (upstream: ${res.data.debug.upstreamStatus}${res.data.debug.redirectedTo ? ", redirected" : ""})`
+          : "";
+        setToast(`저장 완료!${dbg}`, "ok");
       } else {
         setToast(`저장 실패: ${res.data?.error || "unknown"}`, "err");
       }
