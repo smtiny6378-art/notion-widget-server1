@@ -3,10 +3,11 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>KakaoPage → Notion Widget</title>
+  <title>KakaoPage → Notion</title>
   <style>
     :root{
       --bg:#0b0b0c;
+      --panel:#121214;
       --card:#16161a;
       --line: rgba(255,255,255,.10);
       --line2: rgba(255,255,255,.14);
@@ -14,6 +15,8 @@
       --muted:#a9a9b2;
       --muted2:#8b8b94;
       --accent:#ffe400;
+      --ok:#9be59b;
+      --err:#ff9a9a;
       --shadow: 0 16px 40px rgba(0,0,0,.35);
     }
     *{ box-sizing:border-box; }
@@ -25,7 +28,7 @@
     }
     .wrap{
       width:100%;
-      max-width: 980px;
+      max-width: 720px;
       margin: 0 auto;
       padding: 14px;
       background: var(--bg);
@@ -33,252 +36,129 @@
       border-radius: 20px;
     }
 
-    /* header: search + filters */
-    .header{
+    .top{
       display:flex;
-      gap:10px;
+      gap:12px;
       align-items:center;
-      padding: 10px;
+      padding: 12px;
       background: rgba(255,255,255,.03);
       border: 1px solid var(--line);
       border-radius: 16px;
-      flex-wrap: wrap;
     }
     .logo{
-      width:38px; height:38px;
-      border-radius: 12px;
+      width:42px;height:42px;
+      border-radius: 14px;
       background: var(--accent);
       color:#111;
       display:grid;
       place-items:center;
       font-weight:900;
-      letter-spacing: .5px;
-      flex: 0 0 auto;
+      letter-spacing:.4px;
+      flex:0 0 auto;
     }
-    .search{
-      flex: 1 1 380px;
-      display:flex;
-      align-items:center;
-      gap:10px;
-      padding: 10px 12px;
-      border-radius: 14px;
-      background: rgba(255,255,255,.04);
-      border: 1px solid var(--line);
-      min-width: 260px;
+    .title{
+      font-weight:900;
+      font-size:15px;
+      line-height:1.2;
     }
-    .search svg{ opacity:.85; }
-    .search input{ all:unset; flex:1; font-size:14px; color:var(--text); }
-    .search button{
-      all:unset;
-      cursor:pointer;
-      padding: 9px 12px;
-      border-radius: 12px;
-      font-size:13px;
-      font-weight:700;
-      background: rgba(255,255,255,.10);
-      border: 1px solid var(--line2);
-    }
-    .search button:hover{ background: rgba(255,255,255,.14); }
-
-    .filters{
-      display:flex;
-      gap:8px;
-      align-items:center;
-      flex: 0 0 auto;
-    }
-    .filter{
-      cursor:pointer;
-      user-select:none;
-      padding: 9px 12px;
-      border-radius: 999px;
-      border: 1px solid var(--line);
-      background: rgba(255,255,255,.03);
-      font-size: 13px;
-      white-space: nowrap;
-    }
-    .filter.active{
-      background: rgba(255, 228, 0, .12);
-      border-color: rgba(255, 228, 0, .35);
+    .sub{
+      margin-top:4px;
+      color:var(--muted);
+      font-size:12px;
+      line-height:1.35;
     }
 
-    /* section head */
     .section{
-      margin-top: 14px;
-      display:flex;
-      align-items:end;
-      justify-content:space-between;
-      gap:12px;
-    }
-    .section .title{
-      font-size: 14px;
-      font-weight: 900;
-    }
-    .section .hint{
-      font-size: 12px;
-      color: var(--muted);
-    }
-
-    /* carousel */
-    .carousel{ position: relative; margin-top: 10px; }
-    .track{
-      display:flex;
-      gap: 14px;
-      overflow-x: auto;
-      scroll-snap-type: x mandatory;
-      padding: 6px 2px 10px;
-      scrollbar-width: none;
-    }
-    .track::-webkit-scrollbar{ display:none; }
-
-    .big-card{
-      scroll-snap-align: start;
-      flex: 0 0 auto;
-      width: min(540px, 85vw);
-      height: 300px;
-      border-radius: 22px;
+      margin-top: 12px;
+      padding: 12px;
       border: 1px solid var(--line);
-      background: rgba(255,255,255,.06);
-      position: relative;
-      overflow: hidden;
-      box-shadow: var(--shadow);
-      cursor:pointer;
-      user-select:none;
+      border-radius: 16px;
+      background: rgba(255,255,255,.02);
     }
-    .big-card .cover{ position:absolute; inset:0; background: rgba(255,255,255,.08); }
-    .big-card .cover img{
-      width:100%; height:100%;
-      object-fit: cover;
-      display:block;
-      transform: scale(1.03);
-      filter: saturate(1.05);
-    }
-    .big-card .dim{
-      position:absolute; inset:0;
-      background: linear-gradient(180deg, rgba(0,0,0,.05) 20%, rgba(0,0,0,.55) 100%);
-    }
-    .big-card .save{
-      position:absolute;
-      top: 12px; right: 12px;
-      display:flex;
-      align-items:center;
-      gap:8px;
-      padding: 8px 10px;
-      border-radius: 999px;
-      background: rgba(0,0,0,.35);
-      border: 1px solid rgba(255,255,255,.16);
-      font-size: 12px;
+    .sec-title{
+      font-weight:900;
+      font-size:13px;
+      margin-bottom: 10px;
       color: rgba(255,255,255,.92);
+      display:flex;
+      justify-content:space-between;
+      gap:10px;
+      align-items:center;
     }
-    .big-card .meta{
-      position:absolute;
-      left: 16px; right: 16px; bottom: 14px;
+    .sec-title span{
+      color:var(--muted);
+      font-weight:700;
+      font-size:12px;
+    }
+
+    .row{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+    }
+
+    .field{
+      flex:1 1 220px;
       display:flex;
       flex-direction:column;
-      gap:6px;
+      gap:8px;
     }
-    .pill{
-      display:inline-flex;
-      align-items:center;
-      gap:6px;
-      padding: 6px 10px;
-      border-radius: 999px;
-      background: rgba(0,0,0,.35);
-      border: 1px solid rgba(255,255,255,.16);
-      color: rgba(255,255,255,.92);
-      width: fit-content;
-      font-size: 12px;
+    label{
+      font-size:12px;
+      color:var(--muted);
     }
-    .big-card .name{
-      font-size: 22px;
-      font-weight: 900;
-      line-height: 1.12;
-      text-shadow: 0 6px 18px rgba(0,0,0,.45);
-      letter-spacing: -0.2px;
-    }
-    .big-card .sub{
-      font-size: 13px;
-      color: rgba(255,255,255,.84);
-    }
-
-    .nav-btn{
-      position:absolute;
-      top: 50%;
-      transform: translateY(-50%);
-      width: 44px; height: 44px;
-      border-radius: 999px;
-      border: 1px solid rgba(255,255,255,.16);
-      background: rgba(0,0,0,.35);
-      backdrop-filter: blur(6px);
-      display:grid;
-      place-items:center;
-      cursor:pointer;
-      user-select:none;
-    }
-    .nav-btn:hover{ background: rgba(0,0,0,.45); }
-    .nav-left{ left: -6px; }
-    .nav-right{ right: -6px; }
-
-    /* grid */
-    .grid{
-      margin-top: 10px;
-      display:grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 12px;
-    }
-    @media (max-width: 880px){ .grid{ grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-    @media (max-width: 520px){ .grid{ grid-template-columns: 1fr; } }
-
-    .small-card{
-      display:flex;
-      gap: 12px;
-      padding: 12px;
-      border-radius: 18px;
-      background: rgba(255,255,255,.03);
-      border: 1px solid var(--line);
-      cursor:pointer;
-      user-select:none;
-      min-height: 108px;
-    }
-    .thumb{
-      width: 72px; height: 96px;
+    input{
+      all:unset;
+      padding: 11px 12px;
       border-radius: 14px;
-      overflow:hidden;
-      background: rgba(255,255,255,.08);
-      flex: 0 0 auto;
-    }
-    .thumb img{ width:100%; height:100%; object-fit:cover; display:block; }
-    .small-info{ flex:1; min-width:0; display:flex; flex-direction:column; gap:6px; }
-    .small-title{
-      font-weight:900;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.04);
       font-size: 14px;
-      line-height:1.25;
-      white-space:nowrap;
-      overflow:hidden;
-      text-overflow: ellipsis;
+      color: var(--text);
     }
-    .small-meta{
+    input::placeholder{ color: rgba(255,255,255,.35); }
+
+    .btns{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      margin-top: 10px;
+    }
+    button{
+      all:unset;
+      cursor:pointer;
+      padding: 11px 12px;
+      border-radius: 14px;
+      border: 1px solid var(--line2);
+      background: rgba(255,255,255,.08);
+      font-size: 13px;
+      font-weight: 800;
+      user-select:none;
+    }
+    button:hover{ background: rgba(255,255,255,.12); }
+    .primary{
+      background: rgba(255, 228, 0, .18);
+      border-color: rgba(255, 228, 0, .35);
+    }
+    .primary:hover{ background: rgba(255, 228, 0, .24); }
+
+    .hint{
+      margin-top: 10px;
       color: var(--muted);
       font-size: 12px;
-      white-space:nowrap;
-      overflow:hidden;
-      text-overflow: ellipsis;
+      line-height: 1.45;
     }
-    .small-action{
-      margin-top:auto;
-      display:flex;
-      gap:8px;
-      align-items:center;
-      color: rgba(255,255,255,.9);
-      font-size: 12px;
-    }
-    .dot{
-      width:4px; height:4px; border-radius:999px;
-      background: rgba(255,255,255,.35);
-      display:inline-block;
+    .hint code{
+      background: rgba(255,255,255,.06);
+      border: 1px solid var(--line);
+      padding: 2px 6px;
+      border-radius: 8px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size: 11px;
     }
 
     .toast{
-      margin-top: 10px;
+      margin-top: 12px;
       padding: 10px 12px;
       border-radius: 14px;
       border: 1px solid var(--line);
@@ -289,54 +169,110 @@
       display:flex;
       align-items:center;
     }
-    .ok{ color: #9be59b; }
-    .err{ color: #ff9a9a; }
+    .ok{ color: var(--ok); }
+    .err{ color: var(--err); }
+
+    .mini{
+      margin-top: 10px;
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      align-items:center;
+      color: var(--muted2);
+      font-size: 12px;
+    }
+    .pill{
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.03);
+    }
+    a.link{
+      color: rgba(255,255,255,.9);
+      text-decoration: none;
+      border-bottom: 1px solid rgba(255,255,255,.25);
+    }
+    a.link:hover{ border-bottom-color: rgba(255,255,255,.55); }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <div class="header">
+    <div class="top">
       <div class="logo">KP</div>
-
-      <form id="form" class="search" autocomplete="off">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-          <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.6"></circle>
-          <line x1="16.65" y1="16.65" x2="21" y2="21" stroke="currentColor" stroke-width="1.6"></line>
-        </svg>
-        <input id="q" type="text" placeholder="카카오페이지 작품 제목 검색 (웹툰/웹소설 둘 다)" />
-        <button type="submit">검색</button>
-      </form>
-
-      <div class="filters" id="filters">
-        <div class="filter active" data-filter="all">전체</div>
-        <div class="filter" data-filter="webtoon">웹툰</div>
-        <div class="filter" data-filter="novel">웹소설</div>
-      </div>
-    </div>
-
-    <div class="section">
       <div>
-        <div class="title">검색 결과</div>
-        <div class="hint">카드를 클릭하면 노션 DB에 저장돼요</div>
+        <div class="title">카카오페이지 검색 → URL로 노션 저장</div>
+        <div class="sub">
+          카카오페이지는 서버에서 직접 검색이 막혀서, <b>검색은 새 탭</b>으로 열고<br/>
+          <b>작품 URL을 붙여넣어</b> 노션 DB에 저장하는 방식으로 동작해요.
+        </div>
       </div>
-      <div class="hint" id="count"></div>
     </div>
 
-    <div class="carousel">
-      <div class="nav-btn nav-left" id="leftBtn">◀</div>
-      <div class="nav-btn nav-right" id="rightBtn">▶</div>
-      <div class="track" id="track"></div>
+    <!-- 1) Search -->
+    <div class="section">
+      <div class="sec-title">
+        <div>1) 카카오페이지에서 검색 열기</div>
+        <span>웹툰/웹소설 모두 OK</span>
+      </div>
+
+      <div class="row">
+        <div class="field">
+          <label for="keyword">검색어</label>
+          <input id="keyword" placeholder="예: 무정의" />
+        </div>
+      </div>
+
+      <div class="btns">
+        <button class="primary" id="openSearch">카카오페이지 검색 결과 열기 (새 탭)</button>
+        <button id="openHome">카카오페이지 홈 열기</button>
+      </div>
+
+      <div class="hint">
+        새 탭에서 작품을 클릭해 <b>작품 상세 페이지</b>로 들어간 뒤, 주소창 URL을 복사해서 아래에 붙여넣어 주세요.<br/>
+        검색 결과 URL 예시는 <code>https://page.kakao.com/search?keyword=무정의</code> 처럼 생겼어요.
+      </div>
     </div>
 
-    <div class="grid" id="grid"></div>
-    <div class="toast" id="toast">상단 검색창에 제목을 입력해 보세요.</div>
+    <!-- 2) Save -->
+    <div class="section">
+      <div class="sec-title">
+        <div>2) 작품 URL 붙여넣고 노션 저장</div>
+        <span>저장은 위젯에서</span>
+      </div>
+
+      <div class="row">
+        <div class="field" style="flex-basis: 420px;">
+          <label for="contentUrl">카카오페이지 작품 URL</label>
+          <input id="contentUrl" placeholder="예: https://page.kakao.com/content/12345678" />
+        </div>
+        <div class="field">
+          <label for="title">제목(선택)</label>
+          <input id="title" placeholder="비워도 저장 가능 (URL만 저장)" />
+        </div>
+      </div>
+
+      <div class="btns">
+        <button class="primary" id="saveBtn">노션에 저장</button>
+        <button id="openContent">작품 페이지 열기</button>
+        <button id="clearBtn">입력 지우기</button>
+      </div>
+
+      <div class="mini" id="parsed">
+        <span class="pill">작품 ID: -</span>
+        <span class="pill">저장 API: 자동 탐지</span>
+      </div>
+
+      <div class="hint">
+        ⚠️ 브라우저 보안 때문에, 새 탭에서 열린 카카오페이지의 URL을 위젯이 “자동으로 가져올 수는 없어서”
+        <b>URL 붙여넣기 1번</b>이 필요해요.
+      </div>
+    </div>
+
+    <div class="toast" id="toast">검색어를 입력하고 “검색 결과 열기”를 눌러 보세요.</div>
   </div>
 
   <script>
     const $ = (id) => document.getElementById(id);
-
-    let lastItems = [];
-    let activeFilter = "all";
 
     function setToast(text, cls=""){
       const el = $("toast");
@@ -344,176 +280,173 @@
       el.textContent = text || "";
     }
 
-    function escapeHtml(s){
-      return (s || "").replace(/[&<>"']/g, (m) => ({
-        "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"
-      }[m]));
+    function getContentIdFromUrl(url){
+      // 기대 형태: https://page.kakao.com/content/12345678
+      try {
+        const u = new URL(url);
+        if (!u.hostname.includes("page.kakao.com")) return "";
+        const m = u.pathname.match(/\/content\/(\d+)/);
+        return m ? m[1] : "";
+      } catch {
+        return "";
+      }
     }
 
-    async function searchKakaoPage(query){
-      const r = await fetch(`/api/kakaopage-search?q=${encodeURIComponent(query)}`);
-      const data = await r.json();
-      if(!data.ok) throw new Error(data.error || "검색 실패");
-      return data.items || [];
+    function updateParsed(){
+      const url = $("contentUrl").value.trim();
+      const id = getContentIdFromUrl(url);
+      const pills = $("parsed").querySelectorAll(".pill");
+      if (pills[0]) pills[0].textContent = "작품 ID: " + (id || "-");
     }
 
-    async function saveToNotion(item){
-      const r = await fetch(`/api/notion-create`, {
+    function openInNewTab(url){
+      window.open(url, "_blank", "noopener,noreferrer");
+    }
+
+    // 1) Open search
+    $("openSearch").addEventListener("click", () => {
+      const keyword = $("keyword").value.trim();
+      if(!keyword){
+        setToast("검색어를 입력해 주세요.", "err");
+        return;
+      }
+      const url = "https://page.kakao.com/search?keyword=" + encodeURIComponent(keyword);
+      openInNewTab(url);
+      setToast("새 탭으로 카카오페이지 검색 결과를 열었어요. 작품 상세 페이지 URL을 복사해 아래에 붙여넣어 주세요.");
+    });
+
+    $("openHome").addEventListener("click", () => {
+      openInNewTab("https://page.kakao.com/");
+      setToast("새 탭으로 카카오페이지 홈을 열었어요.");
+    });
+
+    // 2) Open content
+    $("openContent").addEventListener("click", () => {
+      const url = $("contentUrl").value.trim();
+      if(!url){
+        setToast("먼저 작품 URL을 붙여넣어 주세요.", "err");
+        return;
+      }
+      try{
+        new URL(url);
+      }catch{
+        setToast("URL 형식이 올바르지 않아요.", "err");
+        return;
+      }
+      openInNewTab(url);
+      setToast("새 탭으로 작품 페이지를 열었어요.");
+    });
+
+    // Clear
+    $("clearBtn").addEventListener("click", () => {
+      $("contentUrl").value = "";
+      $("title").value = "";
+      updateParsed();
+      setToast("입력을 지웠어요.");
+    });
+
+    $("contentUrl").addEventListener("input", updateParsed);
+
+    async function postJson(path, payload){
+      const r = await fetch(path, {
         method: "POST",
         headers: { "content-type":"application/json" },
-        body: JSON.stringify({
-          title: item.title,
-          platform: "카카오페이지",
-          url: item.link,
-          coverUrl: item.coverUrl,
-          author: item.author,
-          genre: item.genre,
-          ageGrade: item.ageGrade
-        })
+        body: JSON.stringify(payload)
       });
-      const data = await r.json();
-      if(!data.ok) throw new Error(data.error || "노션 저장 실패");
-      return data;
+
+      // JSON이 아닌 응답(에러 HTML 등)도 대비
+      const text = await r.text();
+      let data;
+      try { data = JSON.parse(text); }
+      catch { data = { ok:false, error: "Non-JSON response", detail: text.slice(0, 200) }; }
+
+      return { status: r.status, data };
     }
 
-    function metaText(it){
-      const parts = [];
-      if (it.contentType === "webtoon") parts.push("웹툰");
-      else if (it.contentType === "novel") parts.push("웹소설");
+    async function saveToNotion(payload){
+      // ✅ 기존 프로젝트에 /api/addToNotion.js가 있을 수 있어서 우선 시도하고,
+      // 없으면 /api/notion-create 로 fallback
+      const candidates = ["/api/addToNotion", "/api/notion-create"];
+      let lastErr = null;
 
-      if (it.author) parts.push(it.author);
-      if (it.genre) parts.push(it.genre);
-      if (it.ageGrade !== null && it.ageGrade !== undefined) parts.push(`연령 ${it.ageGrade}`);
-      return parts.join(" · ") || "카카오페이지";
+      for (const p of candidates){
+        try{
+          const res = await postJson(p, payload);
+          if (res.data && res.data.ok) return { api: p, result: res.data };
+          // endpoint는 있는데 ok:false면 에러 그대로 반환
+          if (res.data && res.data.error) {
+            lastErr = { api: p, err: res.data };
+          } else {
+            lastErr = { api: p, err: { ok:false, error:"Unknown error" } };
+          }
+        }catch(e){
+          lastErr = { api: p, err: { ok:false, error: e?.message || "Request failed" } };
+        }
+      }
+
+      return { api: (lastErr && lastErr.api) || "-", error: (lastErr && lastErr.err) || { ok:false, error:"Save failed" } };
     }
 
-    function applyFilter(items){
-      if(activeFilter === "all") return items;
-      return items.filter(it => it.contentType === activeFilter);
-    }
+    // Save
+    $("saveBtn").addEventListener("click", async () => {
+      const url = $("contentUrl").value.trim();
+      const title = $("title").value.trim();
+      const contentId = getContentIdFromUrl(url);
 
-    function render(items){
-      const filtered = applyFilter(items);
-
-      $("count").textContent = filtered.length ? `${filtered.length}개` : "";
-
-      $("track").innerHTML = "";
-      $("grid").innerHTML = "";
-
-      if(!filtered.length){
-        setToast("필터 조건에 맞는 결과가 없어요. (전체로 바꿔 보세요)", "err");
+      if(!url){
+        setToast("작품 URL을 붙여넣어 주세요.", "err");
         return;
       }
-      setToast("원하는 카드를 클릭하면 노션에 저장돼요.");
 
-      const big = filtered.slice(0, Math.min(8, filtered.length));
-      $("track").innerHTML = big.map((it) => `
-        <div class="big-card" role="button" tabindex="0" data-key="${escapeHtml(it.seriesId || it.link || it.title)}">
-          <div class="cover">
-            ${it.coverUrl ? `<img src="${escapeHtml(it.coverUrl)}" alt="">` : ""}
-          </div>
-          <div class="dim"></div>
-
-          <div class="save">클릭 → 노션 저장</div>
-
-          <div class="meta">
-            <div style="display:flex; gap:8px; flex-wrap:wrap;">
-              <span class="pill">카카오페이지</span>
-              <span class="pill">${escapeHtml(it.contentType === "webtoon" ? "웹툰" : it.contentType === "novel" ? "웹소설" : "콘텐츠")}</span>
-              <span class="pill">${escapeHtml(it.genre || "작품")}</span>
-            </div>
-            <div class="name">${escapeHtml(it.title || "")}</div>
-            <div class="sub">${escapeHtml(metaText(it))}</div>
-          </div>
-        </div>
-      `).join("");
-
-      $("grid").innerHTML = filtered.map((it) => `
-        <div class="small-card" role="button" tabindex="0" data-key="${escapeHtml(it.seriesId || it.link || it.title)}">
-          <div class="thumb">
-            ${it.coverUrl ? `<img src="${escapeHtml(it.coverUrl)}" alt="">` : ""}
-          </div>
-          <div class="small-info">
-            <div class="small-title">${escapeHtml(it.title || "")}</div>
-            <div class="small-meta">${escapeHtml(metaText(it))}</div>
-            <div class="small-action">
-              <span>노션에 저장</span>
-              <span class="dot"></span>
-              <span style="color: var(--muted2);">클릭</span>
-            </div>
-          </div>
-        </div>
-      `).join("");
-
-      const clickables = [
-        ...$("track").querySelectorAll(".big-card"),
-        ...$("grid").querySelectorAll(".small-card"),
-      ];
-
-      clickables.forEach((el) => {
-        el.addEventListener("click", async () => {
-          const key = el.dataset.key;
-          const item = filtered.find(x => (x.seriesId || x.link || x.title) == key);
-          if(!item) return;
-
-          setToast("노션에 저장 중…");
-          try{
-            const r = await saveToNotion(item);
-            setToast(`저장 완료! (pageId: ${r.pageId})`, "ok");
-          }catch(e){
-            setToast(e.message || "저장 실패", "err");
-          }
-        });
-
-        el.addEventListener("keydown", (e) => {
-          if(e.key === "Enter" || e.key === " "){
-            e.preventDefault();
-            el.click();
-          }
-        });
-      });
-    }
-
-    function scrollTrack(dir){
-      const t = $("track");
-      const amount = Math.max(280, Math.floor(t.clientWidth * 0.85));
-      t.scrollBy({ left: dir * amount, behavior: "smooth" });
-    }
-    $("leftBtn").addEventListener("click", () => scrollTrack(-1));
-    $("rightBtn").addEventListener("click", () => scrollTrack(1));
-
-    $("filters").addEventListener("click", (e) => {
-      const btn = e.target.closest(".filter");
-      if(!btn) return;
-      [...$("filters").querySelectorAll(".filter")].forEach(x => x.classList.remove("active"));
-      btn.classList.add("active");
-      activeFilter = btn.dataset.filter || "all";
-
-      // 이미 검색한 결과가 있으면 바로 필터링해서 다시 렌더
-      if(lastItems.length) render(lastItems);
-      else setToast("먼저 검색을 해 주세요.");
-    });
-
-    $("form").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const q = $("q").value.trim();
-      if(!q){
-        setToast("검색어를 입력해 줘.", "err");
+      // URL 검증
+      try { new URL(url); }
+      catch {
+        setToast("URL 형식이 올바르지 않아요.", "err");
         return;
       }
-      setToast("검색 중…");
-      $("count").textContent = "";
-      $("track").innerHTML = "";
-      $("grid").innerHTML = "";
 
-      try{
-        const items = await searchKakaoPage(q);
-        lastItems = items;
-        render(items);
-      }catch(err){
-        setToast(err.message || "검색 실패", "err");
+      // 카카오페이지 도메인/형식 검증(너무 엄격하진 않게)
+      if(!url.includes("page.kakao.com")){
+        setToast("카카오페이지 URL이 맞는지 확인해 주세요. (page.kakao.com)", "err");
+        return;
+      }
+      if(!contentId){
+        setToast("작품 상세 페이지 URL이어야 해요. 예: https://page.kakao.com/content/12345678", "err");
+        return;
+      }
+
+      setToast("노션에 저장 중…");
+
+      const payload = {
+        // 제목은 없으면 URL만이라도 저장되도록 최소값만 보냄
+        title: title || `카카오페이지 작품 (${contentId})`,
+        platform: "카카오페이지",
+        url: url,
+        // 아래는 지금 단계에서는 자동 수집이 어려워서 비워둠
+        coverUrl: "",
+        author: "",
+        genre: "",
+        ageGrade: null,
+        // 추후 확장 대비
+        kakaoContentId: contentId
+      };
+
+      const saved = await saveToNotion(payload);
+
+      // 표시 업데이트
+      const pills = $("parsed").querySelectorAll(".pill");
+      if (pills[1]) pills[1].textContent = "저장 API: " + (saved.api || "-");
+
+      if (saved.result && saved.result.ok){
+        setToast(`저장 완료! (pageId: ${saved.result.pageId})`, "ok");
+      } else {
+        const msg = saved.error?.error ? String(saved.error.error) : "노션 저장 실패";
+        setToast(`저장 실패: ${msg}`, "err");
       }
     });
+
+    // 초기
+    updateParsed();
   </script>
 </body>
 </html>
