@@ -190,10 +190,6 @@ module.exports = async (req, res) => {
       findPropByNameAndType(props, ["표지", "커버", "cover", "이미지"], "files") ||
       firstPropOfType(props, "files");
 
-    const ratingProp =
-      findPropByNameAndType(props, ["평점", "rating", "별점"], "number") ||
-      firstPropOfType(props, "number");
-
     const authorProp =
       findPropByNameAndType(props, ["작가명", "작가", "저자", "author"], "rich_text") || null;
 
@@ -211,7 +207,7 @@ module.exports = async (req, res) => {
       firstPropOfType(props, "url");
 
     const guideProp =
-      findPropByNameAndType(props, ["로맨스 가이드", "로맨스가이드", "가이드", "guide"], "rich_text") || null;
+      findPropByNameAndType(props, ["로맨스 가이드", "로맨스가이드", "BL 가이드", "BL 가이드" "guide"], "rich_text") || null;
 
     const descProp =
       findPropByNameAndType(props, ["작품 소개", "작품소개", "소개", "description"], "rich_text") || null;
@@ -273,10 +269,6 @@ module.exports = async (req, res) => {
       properties[coverProp] = {
         files: [{ type: "external", name: "cover", external: { url: coverUrl } }],
       };
-    }
-
-    if (ratingProp && props[ratingProp]?.type === "number" && ratingNum != null) {
-      properties[ratingProp] = { number: ratingNum };
     }
 
     if (authorProp && props[authorProp]?.type === "rich_text" && authorName) {
