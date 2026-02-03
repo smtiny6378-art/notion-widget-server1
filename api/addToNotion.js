@@ -15,16 +15,9 @@ function toBoolean(v) {
 
 function normalizeArray(v) {
   if (!v) return [];
-  if (Array.isArray(v)) return v.map(String).map(s => s.trim()).filter(Boolean);
-  if (typeof v === "string") return v.split(/[,|]/g).map(s => s.trim()).filter(Boolean);
+  if (Array.isArray(v)) return v.map(String).map((s) => s.trim()).filter(Boolean);
+  if (typeof v === "string") return v.split(/[,|]/g).map((s) => s.trim()).filter(Boolean);
   return [];
-}
-
-function toNumberSafe(v) {
-  if (v == null || v === "") return null;
-  if (typeof v === "number" && Number.isFinite(v)) return v;
-  const n = Number(String(v).replace(/[^\d.]/g, ""));
-  return Number.isFinite(n) ? n : null;
 }
 
 // ✅ 노션용 텍스트: 줄바꿈 유지 + 과다 줄바꿈 정리
@@ -42,7 +35,6 @@ function toRichTextChunks(value, chunkSize = 2000) {
   const out = [];
   for (let i = 0; i < s.length; i += chunkSize) {
     const chunk = s.slice(i, i + chunkSize);
-    // 내부 \n은 그대로, 빈 문자열만 방지
     if (chunk.trim()) out.push({ type: "text", text: { content: chunk } });
   }
   return out.slice(0, 100);
@@ -57,7 +49,7 @@ function normName(s) {
 }
 
 function firstPropOfType(props, type) {
-  return Object.keys(props).find(k => props[k]?.type === type) || null;
+  return Object.keys(props).find((k) => props[k]?.type === type) || null;
 }
 
 function findPropByNameAndType(props, nameCandidates, typeCandidates) {
@@ -81,9 +73,9 @@ async function ensureSelectOption(databaseId, dbProps, propName, value) {
   if (!prop || prop.type !== "select") return { added: [] };
 
   const existing = prop.select?.options || [];
-  if (existing.some(o => o.name === value)) return { added: [] };
+  if (existing.some((o) => o.name === value)) return { added: [] };
 
-  const newOptions = [...existing.map(o => ({ name: o.name })), { name: value }];
+  const newOptions = [...existing.map((o) => ({ name: o.name })), { name: value }];
 
   await notion.databases.update({
     database_id: databaseId,
@@ -102,14 +94,14 @@ async function ensureMultiSelectOptions(databaseId, dbProps, propName, values) {
   if (!prop || prop.type !== "multi_select") return { added: [] };
 
   const existing = prop.multi_select?.options || [];
-  const existingSet = new Set(existing.map(o => o.name));
+  const existingSet = new Set(existing.map((o) => o.name));
 
-  const need = Array.from(new Set(arr)).filter(v => v && !existingSet.has(v));
+  const need = Array.from(new Set(arr)).filter((v) => v && !existingSet.has(v));
   if (!need.length) return { added: [] };
 
   const newOptions = [
-    ...existing.map(o => ({ name: o.name })),
-    ...need.map(name => ({ name })),
+    ...existing.map((o) => ({ name: o.name })),
+    ...need.map((name) => ({ name })),
   ];
 
   await notion.databases.update({
@@ -134,7 +126,7 @@ function setMultiSelectValue(props, propName, values) {
   const arr = Array.from(new Set(normalizeArray(values)));
   if (!arr.length) return null;
 
-  return { multi_select: arr.map(name => ({ name })) };
+  return { multi_select: arr.map((name) => ({ name })) };
 }
 
 // ---------------- handler ----------------
@@ -149,7 +141,9 @@ module.exports = async (req, res) => {
 
   let body = req.body;
   if (typeof body === "string") {
-    try { body = JSON.parse(body); } catch {}
+    try {
+      body = JSON.parse(body);
+    } catch {}
   }
 
   const title = body?.title?.toString().trim();
@@ -161,7 +155,6 @@ module.exports = async (req, res) => {
 
   const authorName = (body?.authorName ?? "").toString().trim();
   const publisherName = (body?.publisherName ?? "").toString().trim();
-  const ratingNum = toNumberSafe(body?.rating);
 
   const genreArr = normalizeArray(body?.genre);
   const tagsArr = normalizeArray(body?.tags);
@@ -178,7 +171,7 @@ module.exports = async (req, res) => {
     let db = await notion.databases.retrieve({ database_id: databaseId });
     let props = db?.properties || {};
 
-    // ---- property mapping ----
+    // ---- property mapping (네 DB 이름 기준) ----
     const titleProp =
       findPropByNameAndType(props, ["제목", "title", "name", "이름"], "title") ||
       firstPropOfType(props, "title");
@@ -189,6 +182,8 @@ module.exports = async (req, res) => {
     const coverProp =
       findPropByNameAndType(props, ["표지", "커버", "cover", "이미지"], "files") ||
       firstPropOfType(props, "files");
+
+    // ✅ 별점 관련 mapping 제거
 
     const authorProp =
       findPropByNameAndType(props, ["작가명", "작가", "저자", "author"], "rich_text") || null;
@@ -207,7 +202,7 @@ module.exports = async (req, res) => {
       firstPropOfType(props, "url");
 
     const guideProp =
-      findPropByNameAndType(props, ["로맨스 가이드", "로맨스가이드", "BL 가이드", "BL 가이드" "guide"], "rich_text") || null;
+      findPropByNameAndType(props, ["로맨스 가이드", "로맨스가이드", "가이드", "guide"], "rich_text") || null;
 
     const descProp =
       findPropByNameAndType(props, ["작품 소개", "작품소개", "소개", "description"], "rich_text") || null;
@@ -221,9 +216,10 @@ module.exports = async (req, res) => {
     }
 
     // ---- 값 결정 ----
-    const platformValue = "RIDI";
-    const genreValue = genreArr[0] || "";
+    const platformValue = "RIDI";         // 플랫폼은 항상 RIDI
+    const genreValue = genreArr[0] || ""; // 장르는 1개만(Select)
 
+    // 키워드(Multi): tags + (성인일 때 19 추가)
     const keywordValues = isAdult
       ? Array.from(new Set([...tagsArr, "19"]))
       : Array.from(new Set(tagsArr));
@@ -246,6 +242,7 @@ module.exports = async (req, res) => {
       createdOptions.keywords = r.added;
     }
 
+    // 옵션을 추가했으면 스키마 다시 읽기
     if (createdOptions.platform.length || createdOptions.genre.length || createdOptions.keywords.length) {
       db = await notion.databases.retrieve({ database_id: databaseId });
       props = db?.properties || {};
@@ -289,7 +286,6 @@ module.exports = async (req, res) => {
       if (v) properties[keywordsProp] = v;
     }
 
-    // ✅ 여기서 줄바꿈 포함 rich_text 저장
     if (guideProp && props[guideProp]?.type === "rich_text" && guideText.trim()) {
       properties[guideProp] = { rich_text: toRichTextChunks(guideText) };
     }
@@ -308,8 +304,16 @@ module.exports = async (req, res) => {
       ok: true,
       pageId: created.id,
       mapped: {
-        titleProp, platformProp, coverProp, ratingProp, authorProp, publisherProp,
-        genreProp, keywordsProp, urlProp, guideProp, descProp
+        titleProp,
+        platformProp,
+        coverProp,
+        authorProp,
+        publisherProp,
+        genreProp,
+        keywordsProp,
+        urlProp,
+        guideProp,
+        descProp,
       },
       createdOptions,
       usedValues: { platformValue, genreValue, keywordValues },
