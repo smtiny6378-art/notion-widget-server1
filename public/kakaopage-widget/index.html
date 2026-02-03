@@ -3,152 +3,364 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>KakaoPage → Notion</title>
+  <title>KakaoPage → Notion Widget</title>
   <style>
-    :root {
-      --bg: #0b0b0c;
-      --card: #141416;
-      --text: #e9e9ea;
-      --muted: #a8a8ad;
+    :root{
+      --bg:#0b0b0c;
+      --card:#16161a;
       --line: rgba(255,255,255,.10);
-      --accent: #ffe400;
+      --line2: rgba(255,255,255,.14);
+      --text:#f2f2f3;
+      --muted:#a9a9b2;
+      --muted2:#8b8b94;
+      --accent:#ffe400;
+      --shadow: 0 16px 40px rgba(0,0,0,.35);
     }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      background: transparent;
-      color: var(--text);
+    *{ box-sizing:border-box; }
+    body{
+      margin:0;
+      background:transparent;
+      color:var(--text);
       font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
     }
-    .wrap {
+    .wrap{
+      width:100%;
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 14px;
       background: var(--bg);
       border: 1px solid var(--line);
+      border-radius: 20px;
+    }
+
+    /* header: search + filters */
+    .header{
+      display:flex;
+      gap:10px;
+      align-items:center;
+      padding: 10px;
+      background: rgba(255,255,255,.03);
+      border: 1px solid var(--line);
       border-radius: 16px;
-      padding: 14px;
-      width: 100%;
-      max-width: 560px;
-      margin: 0 auto;
+      flex-wrap: wrap;
     }
-    .top {
-      display: flex;
-      gap: 12px;
-      align-items: center;
-    }
-    .badge {
-      width: 44px; height: 44px;
+    .logo{
+      width:38px; height:38px;
       border-radius: 12px;
       background: var(--accent);
-      color: #111;
-      display: grid;
-      place-items: center;
-      font-weight: 900;
+      color:#111;
+      display:grid;
+      place-items:center;
+      font-weight:900;
+      letter-spacing: .5px;
+      flex: 0 0 auto;
     }
-    .title { font-weight: 800; font-size: 16px; }
-    .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
-    form { margin-top: 12px; }
-    .search {
-      display: flex;
-      gap: 10px;
-      align-items: center;
-      border: 1px solid var(--line);
-      background: rgba(255,255,255,.04);
-      border-radius: 12px;
+    .search{
+      flex: 1 1 380px;
+      display:flex;
+      align-items:center;
+      gap:10px;
       padding: 10px 12px;
-    }
-    input {
-      all: unset;
-      flex: 1;
-      font-size: 14px;
-      color: var(--text);
-    }
-    button {
-      all: unset;
-      cursor: pointer;
-      padding: 8px 10px;
-      border-radius: 10px;
-      background: rgba(255,255,255,.10);
-      border: 1px solid var(--line);
-      font-size: 13px;
-    }
-    button:hover { background: rgba(255,255,255,.14); }
-    .list { margin-top: 12px; display: grid; gap: 10px; }
-    .item {
-      display: grid;
-      grid-template-columns: 56px 1fr auto;
-      gap: 12px;
-      align-items: center;
-      padding: 10px;
-      background: var(--card);
-      border: 1px solid var(--line);
       border-radius: 14px;
-    }
-    .cover {
-      width: 56px; height: 76px;
-      border-radius: 10px;
-      background: rgba(255,255,255,.08);
-      overflow: hidden;
-    }
-    .cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
-    .it-title { font-weight: 800; font-size: 14px; line-height: 1.25; }
-    .it-meta { color: var(--muted); font-size: 12px; margin-top: 4px; }
-    .pill {
-      font-size: 11px;
-      color: var(--muted);
+      background: rgba(255,255,255,.04);
       border: 1px solid var(--line);
-      padding: 6px 8px;
+      min-width: 260px;
+    }
+    .search svg{ opacity:.85; }
+    .search input{ all:unset; flex:1; font-size:14px; color:var(--text); }
+    .search button{
+      all:unset;
+      cursor:pointer;
+      padding: 9px 12px;
+      border-radius: 12px;
+      font-size:13px;
+      font-weight:700;
+      background: rgba(255,255,255,.10);
+      border: 1px solid var(--line2);
+    }
+    .search button:hover{ background: rgba(255,255,255,.14); }
+
+    .filters{
+      display:flex;
+      gap:8px;
+      align-items:center;
+      flex: 0 0 auto;
+    }
+    .filter{
+      cursor:pointer;
+      user-select:none;
+      padding: 9px 12px;
       border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.03);
+      font-size: 13px;
       white-space: nowrap;
     }
-    .msg { margin-top: 10px; color: var(--muted); font-size: 12px; }
-    .ok { color: #9be59b; }
-    .err { color: #ff8f8f; }
+    .filter.active{
+      background: rgba(255, 228, 0, .12);
+      border-color: rgba(255, 228, 0, .35);
+    }
+
+    /* section head */
+    .section{
+      margin-top: 14px;
+      display:flex;
+      align-items:end;
+      justify-content:space-between;
+      gap:12px;
+    }
+    .section .title{
+      font-size: 14px;
+      font-weight: 900;
+    }
+    .section .hint{
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    /* carousel */
+    .carousel{ position: relative; margin-top: 10px; }
+    .track{
+      display:flex;
+      gap: 14px;
+      overflow-x: auto;
+      scroll-snap-type: x mandatory;
+      padding: 6px 2px 10px;
+      scrollbar-width: none;
+    }
+    .track::-webkit-scrollbar{ display:none; }
+
+    .big-card{
+      scroll-snap-align: start;
+      flex: 0 0 auto;
+      width: min(540px, 85vw);
+      height: 300px;
+      border-radius: 22px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.06);
+      position: relative;
+      overflow: hidden;
+      box-shadow: var(--shadow);
+      cursor:pointer;
+      user-select:none;
+    }
+    .big-card .cover{ position:absolute; inset:0; background: rgba(255,255,255,.08); }
+    .big-card .cover img{
+      width:100%; height:100%;
+      object-fit: cover;
+      display:block;
+      transform: scale(1.03);
+      filter: saturate(1.05);
+    }
+    .big-card .dim{
+      position:absolute; inset:0;
+      background: linear-gradient(180deg, rgba(0,0,0,.05) 20%, rgba(0,0,0,.55) 100%);
+    }
+    .big-card .save{
+      position:absolute;
+      top: 12px; right: 12px;
+      display:flex;
+      align-items:center;
+      gap:8px;
+      padding: 8px 10px;
+      border-radius: 999px;
+      background: rgba(0,0,0,.35);
+      border: 1px solid rgba(255,255,255,.16);
+      font-size: 12px;
+      color: rgba(255,255,255,.92);
+    }
+    .big-card .meta{
+      position:absolute;
+      left: 16px; right: 16px; bottom: 14px;
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+    }
+    .pill{
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(0,0,0,.35);
+      border: 1px solid rgba(255,255,255,.16);
+      color: rgba(255,255,255,.92);
+      width: fit-content;
+      font-size: 12px;
+    }
+    .big-card .name{
+      font-size: 22px;
+      font-weight: 900;
+      line-height: 1.12;
+      text-shadow: 0 6px 18px rgba(0,0,0,.45);
+      letter-spacing: -0.2px;
+    }
+    .big-card .sub{
+      font-size: 13px;
+      color: rgba(255,255,255,.84);
+    }
+
+    .nav-btn{
+      position:absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 44px; height: 44px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,.16);
+      background: rgba(0,0,0,.35);
+      backdrop-filter: blur(6px);
+      display:grid;
+      place-items:center;
+      cursor:pointer;
+      user-select:none;
+    }
+    .nav-btn:hover{ background: rgba(0,0,0,.45); }
+    .nav-left{ left: -6px; }
+    .nav-right{ right: -6px; }
+
+    /* grid */
+    .grid{
+      margin-top: 10px;
+      display:grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+    @media (max-width: 880px){ .grid{ grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    @media (max-width: 520px){ .grid{ grid-template-columns: 1fr; } }
+
+    .small-card{
+      display:flex;
+      gap: 12px;
+      padding: 12px;
+      border-radius: 18px;
+      background: rgba(255,255,255,.03);
+      border: 1px solid var(--line);
+      cursor:pointer;
+      user-select:none;
+      min-height: 108px;
+    }
+    .thumb{
+      width: 72px; height: 96px;
+      border-radius: 14px;
+      overflow:hidden;
+      background: rgba(255,255,255,.08);
+      flex: 0 0 auto;
+    }
+    .thumb img{ width:100%; height:100%; object-fit:cover; display:block; }
+    .small-info{ flex:1; min-width:0; display:flex; flex-direction:column; gap:6px; }
+    .small-title{
+      font-weight:900;
+      font-size: 14px;
+      line-height:1.25;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow: ellipsis;
+    }
+    .small-meta{
+      color: var(--muted);
+      font-size: 12px;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow: ellipsis;
+    }
+    .small-action{
+      margin-top:auto;
+      display:flex;
+      gap:8px;
+      align-items:center;
+      color: rgba(255,255,255,.9);
+      font-size: 12px;
+    }
+    .dot{
+      width:4px; height:4px; border-radius:999px;
+      background: rgba(255,255,255,.35);
+      display:inline-block;
+    }
+
+    .toast{
+      margin-top: 10px;
+      padding: 10px 12px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.03);
+      color: var(--muted);
+      font-size: 12px;
+      min-height: 40px;
+      display:flex;
+      align-items:center;
+    }
+    .ok{ color: #9be59b; }
+    .err{ color: #ff9a9a; }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <div class="top">
-      <div class="badge">KP</div>
-      <div>
-        <div class="title">카카오페이지 검색 → 노션 저장</div>
-        <div class="sub">검색하고 결과를 클릭하면 노션 DB에 페이지가 생성돼요</div>
+    <div class="header">
+      <div class="logo">KP</div>
+
+      <form id="form" class="search" autocomplete="off">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+          <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.6"></circle>
+          <line x1="16.65" y1="16.65" x2="21" y2="21" stroke="currentColor" stroke-width="1.6"></line>
+        </svg>
+        <input id="q" type="text" placeholder="카카오페이지 작품 제목 검색 (웹툰/웹소설 둘 다)" />
+        <button type="submit">검색</button>
+      </form>
+
+      <div class="filters" id="filters">
+        <div class="filter active" data-filter="all">전체</div>
+        <div class="filter" data-filter="webtoon">웹툰</div>
+        <div class="filter" data-filter="novel">웹소설</div>
       </div>
     </div>
 
-    <form id="f">
-      <div class="search">
-        <input id="q" placeholder="작품 제목을 입력" autocomplete="off" />
-        <button id="go" type="submit">검색</button>
+    <div class="section">
+      <div>
+        <div class="title">검색 결과</div>
+        <div class="hint">카드를 클릭하면 노션 DB에 저장돼요</div>
       </div>
-    </form>
+      <div class="hint" id="count"></div>
+    </div>
 
-    <div id="msg" class="msg"></div>
-    <div id="list" class="list"></div>
+    <div class="carousel">
+      <div class="nav-btn nav-left" id="leftBtn">◀</div>
+      <div class="nav-btn nav-right" id="rightBtn">▶</div>
+      <div class="track" id="track"></div>
+    </div>
+
+    <div class="grid" id="grid"></div>
+    <div class="toast" id="toast">상단 검색창에 제목을 입력해 보세요.</div>
   </div>
 
   <script>
     const $ = (id) => document.getElementById(id);
-    const msg = (text, cls="") => {
-      $("msg").className = "msg " + cls;
-      $("msg").textContent = text || "";
-    };
 
-    function escapeHtml(s) {
+    let lastItems = [];
+    let activeFilter = "all";
+
+    function setToast(text, cls=""){
+      const el = $("toast");
+      el.className = "toast " + cls;
+      el.textContent = text || "";
+    }
+
+    function escapeHtml(s){
       return (s || "").replace(/[&<>"']/g, (m) => ({
         "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"
       }[m]));
     }
 
-    async function searchKakaoPage(query) {
+    async function searchKakaoPage(query){
       const r = await fetch(`/api/kakaopage-search?q=${encodeURIComponent(query)}`);
       const data = await r.json();
-      if (!data.ok) throw new Error(data.error || "검색 실패");
+      if(!data.ok) throw new Error(data.error || "검색 실패");
       return data.items || [];
     }
 
-    async function saveToNotion(item) {
+    async function saveToNotion(item){
       const r = await fetch(`/api/notion-create`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type":"application/json" },
         body: JSON.stringify({
           title: item.title,
           platform: "카카오페이지",
@@ -160,63 +372,146 @@
         })
       });
       const data = await r.json();
-      if (!data.ok) throw new Error(data.error || "노션 저장 실패");
+      if(!data.ok) throw new Error(data.error || "노션 저장 실패");
       return data;
     }
 
-    function render(items) {
-      const root = $("list");
-      if (!items.length) {
-        root.innerHTML = "";
-        msg("검색 결과가 없어요.");
+    function metaText(it){
+      const parts = [];
+      if (it.contentType === "webtoon") parts.push("웹툰");
+      else if (it.contentType === "novel") parts.push("웹소설");
+
+      if (it.author) parts.push(it.author);
+      if (it.genre) parts.push(it.genre);
+      if (it.ageGrade !== null && it.ageGrade !== undefined) parts.push(`연령 ${it.ageGrade}`);
+      return parts.join(" · ") || "카카오페이지";
+    }
+
+    function applyFilter(items){
+      if(activeFilter === "all") return items;
+      return items.filter(it => it.contentType === activeFilter);
+    }
+
+    function render(items){
+      const filtered = applyFilter(items);
+
+      $("count").textContent = filtered.length ? `${filtered.length}개` : "";
+
+      $("track").innerHTML = "";
+      $("grid").innerHTML = "";
+
+      if(!filtered.length){
+        setToast("필터 조건에 맞는 결과가 없어요. (전체로 바꿔 보세요)", "err");
         return;
       }
+      setToast("원하는 카드를 클릭하면 노션에 저장돼요.");
 
-      root.innerHTML = items.map((it, idx) => {
-        const metaParts = [];
-        if (it.author) metaParts.push(it.author);
-        if (it.genre) metaParts.push(it.genre);
-        if (it.ageGrade !== null && it.ageGrade !== undefined) metaParts.push(`연령 ${it.ageGrade}`);
-
-        return `
-          <div class="item" data-idx="${idx}">
-            <div class="cover">${it.coverUrl ? `<img src="${escapeHtml(it.coverUrl)}" alt="">` : ""}</div>
-            <div>
-              <div class="it-title">${escapeHtml(it.title)}</div>
-              <div class="it-meta">${escapeHtml(metaParts.join(" · ") || "카카오페이지")}</div>
-            </div>
-            <div class="pill">노션 저장</div>
+      const big = filtered.slice(0, Math.min(8, filtered.length));
+      $("track").innerHTML = big.map((it) => `
+        <div class="big-card" role="button" tabindex="0" data-key="${escapeHtml(it.seriesId || it.link || it.title)}">
+          <div class="cover">
+            ${it.coverUrl ? `<img src="${escapeHtml(it.coverUrl)}" alt="">` : ""}
           </div>
-        `;
-      }).join("");
+          <div class="dim"></div>
 
-      [...root.querySelectorAll(".item")].forEach(el => {
+          <div class="save">클릭 → 노션 저장</div>
+
+          <div class="meta">
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+              <span class="pill">카카오페이지</span>
+              <span class="pill">${escapeHtml(it.contentType === "webtoon" ? "웹툰" : it.contentType === "novel" ? "웹소설" : "콘텐츠")}</span>
+              <span class="pill">${escapeHtml(it.genre || "작품")}</span>
+            </div>
+            <div class="name">${escapeHtml(it.title || "")}</div>
+            <div class="sub">${escapeHtml(metaText(it))}</div>
+          </div>
+        </div>
+      `).join("");
+
+      $("grid").innerHTML = filtered.map((it) => `
+        <div class="small-card" role="button" tabindex="0" data-key="${escapeHtml(it.seriesId || it.link || it.title)}">
+          <div class="thumb">
+            ${it.coverUrl ? `<img src="${escapeHtml(it.coverUrl)}" alt="">` : ""}
+          </div>
+          <div class="small-info">
+            <div class="small-title">${escapeHtml(it.title || "")}</div>
+            <div class="small-meta">${escapeHtml(metaText(it))}</div>
+            <div class="small-action">
+              <span>노션에 저장</span>
+              <span class="dot"></span>
+              <span style="color: var(--muted2);">클릭</span>
+            </div>
+          </div>
+        </div>
+      `).join("");
+
+      const clickables = [
+        ...$("track").querySelectorAll(".big-card"),
+        ...$("grid").querySelectorAll(".small-card"),
+      ];
+
+      clickables.forEach((el) => {
         el.addEventListener("click", async () => {
-          const idx = Number(el.dataset.idx);
-          const item = items[idx];
-          msg("노션에 저장 중…");
-          try {
+          const key = el.dataset.key;
+          const item = filtered.find(x => (x.seriesId || x.link || x.title) == key);
+          if(!item) return;
+
+          setToast("노션에 저장 중…");
+          try{
             const r = await saveToNotion(item);
-            msg(`저장 완료! (pageId: ${r.pageId})`, "ok");
-          } catch (e) {
-            msg(e.message || "저장 실패", "err");
+            setToast(`저장 완료! (pageId: ${r.pageId})`, "ok");
+          }catch(e){
+            setToast(e.message || "저장 실패", "err");
+          }
+        });
+
+        el.addEventListener("keydown", (e) => {
+          if(e.key === "Enter" || e.key === " "){
+            e.preventDefault();
+            el.click();
           }
         });
       });
     }
 
-    $("f").addEventListener("submit", async (e) => {
+    function scrollTrack(dir){
+      const t = $("track");
+      const amount = Math.max(280, Math.floor(t.clientWidth * 0.85));
+      t.scrollBy({ left: dir * amount, behavior: "smooth" });
+    }
+    $("leftBtn").addEventListener("click", () => scrollTrack(-1));
+    $("rightBtn").addEventListener("click", () => scrollTrack(1));
+
+    $("filters").addEventListener("click", (e) => {
+      const btn = e.target.closest(".filter");
+      if(!btn) return;
+      [...$("filters").querySelectorAll(".filter")].forEach(x => x.classList.remove("active"));
+      btn.classList.add("active");
+      activeFilter = btn.dataset.filter || "all";
+
+      // 이미 검색한 결과가 있으면 바로 필터링해서 다시 렌더
+      if(lastItems.length) render(lastItems);
+      else setToast("먼저 검색을 해 주세요.");
+    });
+
+    $("form").addEventListener("submit", async (e) => {
       e.preventDefault();
       const q = $("q").value.trim();
-      if (!q) return msg("검색어를 입력해 줘.");
-      msg("검색 중…");
-      $("list").innerHTML = "";
-      try {
+      if(!q){
+        setToast("검색어를 입력해 줘.", "err");
+        return;
+      }
+      setToast("검색 중…");
+      $("count").textContent = "";
+      $("track").innerHTML = "";
+      $("grid").innerHTML = "";
+
+      try{
         const items = await searchKakaoPage(q);
-        msg("");
+        lastItems = items;
         render(items);
-      } catch (e) {
-        msg(e.message || "검색 실패", "err");
+      }catch(err){
+        setToast(err.message || "검색 실패", "err");
       }
     });
   </script>
