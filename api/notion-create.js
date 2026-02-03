@@ -1,36 +1,35 @@
 // api/notion-create.js
 // POST /api/notion-create
-// body: { title, platform, url, coverUrl, author, genre, ageGrade }
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type,Authorization");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
   if (req.method === "OPTIONS") return res.status(204).end();
   if (req.method !== "POST") return res.status(405).json({ ok: false, error: "Method Not Allowed" });
 
-  const NOTION_TOKEN = process.env.NOTION_TOKEN; // secret_
-  const NOTION_DB_ID = process.env.NOTION_DB_ID; // database id
+  const NOTION_TOKEN = process.env.NOTION_TOKEN;
+  const NOTION_DB_ID = process.env.NOTION_DB_ID;
+
   if (!NOTION_TOKEN || !NOTION_DB_ID) {
-    return res.status(500).json({ ok: false, error: "Missing NOTION_TOKEN or NOTION_DB_ID in env" });
+    return res.status(500).json({ ok: false, error: "Missing NOTION_TOKEN or NOTION_DB_ID" });
   }
 
   try {
-    const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
-
-    const title = (body?.title || "").toString().trim();
-    const platform = (body?.platform || "카카오페이지").toString();
-    const url = (body?.url || "").toString();
-    const coverUrl = (body?.coverUrl || "").toString();
-    const author = (body?.author || "").toString();
-    const genre = (body?.genre || "").toString();
-    const ageGrade = body?.ageGrade;
+    const body = (typeof req.body === "string") ? JSON.parse(req.body) : (req.body || {});
+    const title = (body.title || "").toString().trim();
 
     if (!title) return res.status(400).json({ ok: false, error: "Missing title" });
 
-    // ✅ 여기서 "노션 DB 속성명"을 네 DB에 맞게 바꿔줘야 해.
-    // (리디 때 이미 쓰던 속성명이 있으면 그대로 맞춰 쓰면 됨)
+    const platform = (body.platform || "카카오페이지").toString();
+    const url = (body.url || "").toString();
+    const coverUrl = (body.coverUrl || "").toString();
+    const author = (body.author || "").toString();
+    const genre = (body.genre || "").toString();
+    const ageGrade = body.ageGrade;
+
+    // ✅ 너 DB 속성명에 맞춰야 함 (리디 위젯이 쓰던 속성명 그대로 쓰는 걸 추천)
     const properties = {
       "제목": { title: [{ text: { content: title } }] },
       "플랫폼": { select: { name: platform } },
@@ -42,7 +41,6 @@ export default async function handler(req, res) {
         : undefined,
     };
 
-    // undefined 제거
     Object.keys(properties).forEach((k) => properties[k] === undefined && delete properties[k]);
 
     const payload = {
@@ -52,14 +50,12 @@ export default async function handler(req, res) {
         {
           object: "block",
           type: "paragraph",
-          paragraph: { rich_text: [{ type: "text", text: { content: "자동 저장됨 (카카오페이지 검색 위젯)" } }] },
+          paragraph: { rich_text: [{ type: "text", text: { content: "자동 저장됨 (카카오페이지 위젯)" } }] },
         },
       ],
     };
 
-    if (coverUrl) {
-      payload.cover = { type: "external", external: { url: coverUrl } };
-    }
+    if (coverUrl) payload.cover = { type: "external", external: { url: coverUrl } };
 
     const r = await fetch("https://api.notion.com/v1/pages", {
       method: "POST",
@@ -78,4 +74,4 @@ export default async function handler(req, res) {
   } catch (e) {
     return res.status(500).json({ ok: false, error: e?.message || "Unknown error" });
   }
-}
+};
