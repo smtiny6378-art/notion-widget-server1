@@ -8,7 +8,6 @@
     :root{
       --bg:#0b0b0c;
       --panel:#121214;
-      --card:#16161a;
       --line: rgba(255,255,255,.10);
       --line2: rgba(255,255,255,.14);
       --text:#f2f2f3;
@@ -17,7 +16,6 @@
       --accent:#ffe400;
       --ok:#9be59b;
       --err:#ff9a9a;
-      --shadow: 0 16px 40px rgba(0,0,0,.35);
     }
     *{ box-sizing:border-box; }
     body{
@@ -35,7 +33,6 @@
       border: 1px solid var(--line);
       border-radius: 20px;
     }
-
     .top{
       display:flex;
       gap:12px;
@@ -56,17 +53,8 @@
       letter-spacing:.4px;
       flex:0 0 auto;
     }
-    .title{
-      font-weight:900;
-      font-size:15px;
-      line-height:1.2;
-    }
-    .sub{
-      margin-top:4px;
-      color:var(--muted);
-      font-size:12px;
-      line-height:1.35;
-    }
+    .title{ font-weight:900; font-size:15px; line-height:1.2; }
+    .sub{ margin-top:4px; color:var(--muted); font-size:12px; line-height:1.35; }
 
     .section{
       margin-top: 12px;
@@ -85,28 +73,10 @@
       gap:10px;
       align-items:center;
     }
-    .sec-title span{
-      color:var(--muted);
-      font-weight:700;
-      font-size:12px;
-    }
-
-    .row{
-      display:flex;
-      gap:10px;
-      flex-wrap:wrap;
-    }
-
-    .field{
-      flex:1 1 220px;
-      display:flex;
-      flex-direction:column;
-      gap:8px;
-    }
-    label{
-      font-size:12px;
-      color:var(--muted);
-    }
+    .sec-title span{ color:var(--muted); font-weight:700; font-size:12px; }
+    .row{ display:flex; gap:10px; flex-wrap:wrap; }
+    .field{ flex:1 1 220px; display:flex; flex-direction:column; gap:8px; }
+    label{ font-size:12px; color:var(--muted); }
     input{
       all:unset;
       padding: 11px 12px;
@@ -118,12 +88,7 @@
     }
     input::placeholder{ color: rgba(255,255,255,.35); }
 
-    .btns{
-      display:flex;
-      gap:10px;
-      flex-wrap:wrap;
-      margin-top: 10px;
-    }
+    .btns{ display:flex; gap:10px; flex-wrap:wrap; margin-top: 10px; }
     button{
       all:unset;
       cursor:pointer;
@@ -171,28 +136,6 @@
     }
     .ok{ color: var(--ok); }
     .err{ color: var(--err); }
-
-    .mini{
-      margin-top: 10px;
-      display:flex;
-      gap:8px;
-      flex-wrap:wrap;
-      align-items:center;
-      color: var(--muted2);
-      font-size: 12px;
-    }
-    .pill{
-      padding: 6px 10px;
-      border-radius: 999px;
-      border: 1px solid var(--line);
-      background: rgba(255,255,255,.03);
-    }
-    a.link{
-      color: rgba(255,255,255,.9);
-      text-decoration: none;
-      border-bottom: 1px solid rgba(255,255,255,.25);
-    }
-    a.link:hover{ border-bottom-color: rgba(255,255,255,.55); }
   </style>
 </head>
 <body>
@@ -202,16 +145,15 @@
       <div>
         <div class="title">카카오페이지 검색 → URL로 노션 저장</div>
         <div class="sub">
-          카카오페이지는 서버에서 직접 검색이 막혀서, <b>검색은 새 탭</b>으로 열고<br/>
-          <b>작품 URL을 붙여넣어</b> 노션 DB에 저장하는 방식으로 동작해요.
+          검색은 새 탭(카카오페이지)에서 하고,<br/>
+          작품 상세 URL을 붙여넣어 노션 DB에 저장해요.
         </div>
       </div>
     </div>
 
-    <!-- 1) Search -->
     <div class="section">
       <div class="sec-title">
-        <div>1) 카카오페이지에서 검색 열기</div>
+        <div>1) 카카오페이지 검색 열기</div>
         <span>웹툰/웹소설 모두 OK</span>
       </div>
 
@@ -223,31 +165,26 @@
       </div>
 
       <div class="btns">
-        <button class="primary" id="openSearch">카카오페이지 검색 결과 열기 (새 탭)</button>
-        <button id="openHome">카카오페이지 홈 열기</button>
+        <button class="primary" id="openSearch">검색 결과 열기 (새 탭)</button>
+        <button id="openHome">카카오페이지 홈</button>
       </div>
 
       <div class="hint">
-        새 탭에서 작품을 클릭해 <b>작품 상세 페이지</b>로 들어간 뒤, 주소창 URL을 복사해서 아래에 붙여넣어 주세요.<br/>
-        검색 결과 URL 예시는 <code>https://page.kakao.com/search?keyword=무정의</code> 처럼 생겼어요.
+        ✅ 검색 결과는 이 주소로 열려요: <code>https://page.kakao.com/search/result?keyword=검색어</code><br/>
+        작품 URL 예시: <code>https://page.kakao.com/content/65171279</code>
       </div>
     </div>
 
-    <!-- 2) Save -->
     <div class="section">
       <div class="sec-title">
-        <div>2) 작품 URL 붙여넣고 노션 저장</div>
-        <span>저장은 위젯에서</span>
+        <div>2) 작품 URL 붙여넣고 저장</div>
+        <span>제목/표지 자동 채우기 지원</span>
       </div>
 
       <div class="row">
         <div class="field" style="flex-basis: 420px;">
           <label for="contentUrl">카카오페이지 작품 URL</label>
-          <input id="contentUrl" placeholder="예: https://page.kakao.com/content/12345678" />
-        </div>
-        <div class="field">
-          <label for="title">제목(선택)</label>
-          <input id="title" placeholder="비워도 저장 가능 (URL만 저장)" />
+          <input id="contentUrl" placeholder="예: https://page.kakao.com/content/65171279" />
         </div>
       </div>
 
@@ -257,14 +194,8 @@
         <button id="clearBtn">입력 지우기</button>
       </div>
 
-      <div class="mini" id="parsed">
-        <span class="pill">작품 ID: -</span>
-        <span class="pill">저장 API: 자동 탐지</span>
-      </div>
-
       <div class="hint">
-        ⚠️ 브라우저 보안 때문에, 새 탭에서 열린 카카오페이지의 URL을 위젯이 “자동으로 가져올 수는 없어서”
-        <b>URL 붙여넣기 1번</b>이 필요해요.
+        저장 시 서버가 작품 페이지의 메타(제목/표지/소개)를 최대한 가져와서 노션 속성에 채워요.
       </div>
     </div>
 
@@ -280,72 +211,37 @@
       el.textContent = text || "";
     }
 
-    function getContentIdFromUrl(url){
-      // 기대 형태: https://page.kakao.com/content/12345678
-      try {
-        const u = new URL(url);
-        if (!u.hostname.includes("page.kakao.com")) return "";
-        const m = u.pathname.match(/\/content\/(\d+)/);
-        return m ? m[1] : "";
-      } catch {
-        return "";
-      }
-    }
-
-    function updateParsed(){
-      const url = $("contentUrl").value.trim();
-      const id = getContentIdFromUrl(url);
-      const pills = $("parsed").querySelectorAll(".pill");
-      if (pills[0]) pills[0].textContent = "작품 ID: " + (id || "-");
-    }
-
     function openInNewTab(url){
       window.open(url, "_blank", "noopener,noreferrer");
     }
 
-    // 1) Open search
     $("openSearch").addEventListener("click", () => {
       const keyword = $("keyword").value.trim();
-      if(!keyword){
-        setToast("검색어를 입력해 주세요.", "err");
-        return;
-      }
-      const url = "https://page.kakao.com/search?keyword=" + encodeURIComponent(keyword);
+      if(!keyword) return setToast("검색어를 입력해 주세요.", "err");
+
+      // ✅ 실제 검색 결과 URL
+      const url = "https://page.kakao.com/search/result?keyword=" + encodeURIComponent(keyword);
       openInNewTab(url);
-      setToast("새 탭으로 카카오페이지 검색 결과를 열었어요. 작품 상세 페이지 URL을 복사해 아래에 붙여넣어 주세요.");
+      setToast("새 탭으로 검색 결과를 열었어요. 작품 상세 페이지로 들어간 뒤 URL을 복사해 붙여넣어 주세요.");
     });
 
     $("openHome").addEventListener("click", () => {
       openInNewTab("https://page.kakao.com/");
-      setToast("새 탭으로 카카오페이지 홈을 열었어요.");
+      setToast("새 탭으로 홈을 열었어요.");
     });
 
-    // 2) Open content
     $("openContent").addEventListener("click", () => {
       const url = $("contentUrl").value.trim();
-      if(!url){
-        setToast("먼저 작품 URL을 붙여넣어 주세요.", "err");
-        return;
-      }
-      try{
-        new URL(url);
-      }catch{
-        setToast("URL 형식이 올바르지 않아요.", "err");
-        return;
-      }
+      if(!url) return setToast("먼저 작품 URL을 붙여넣어 주세요.", "err");
+      try { new URL(url); } catch { return setToast("URL 형식이 올바르지 않아요.", "err"); }
       openInNewTab(url);
       setToast("새 탭으로 작품 페이지를 열었어요.");
     });
 
-    // Clear
     $("clearBtn").addEventListener("click", () => {
       $("contentUrl").value = "";
-      $("title").value = "";
-      updateParsed();
       setToast("입력을 지웠어요.");
     });
-
-    $("contentUrl").addEventListener("input", updateParsed);
 
     async function postJson(path, payload){
       const r = await fetch(path, {
@@ -353,100 +249,32 @@
         headers: { "content-type":"application/json" },
         body: JSON.stringify(payload)
       });
-
-      // JSON이 아닌 응답(에러 HTML 등)도 대비
       const text = await r.text();
       let data;
       try { data = JSON.parse(text); }
-      catch { data = { ok:false, error: "Non-JSON response", detail: text.slice(0, 200) }; }
-
+      catch { data = { ok:false, error:"Non-JSON response", detail:text.slice(0,200) }; }
       return { status: r.status, data };
     }
 
-    async function saveToNotion(payload){
-      // ✅ 기존 프로젝트에 /api/addToNotion.js가 있을 수 있어서 우선 시도하고,
-      // 없으면 /api/notion-create 로 fallback
-      const candidates = ["/api/addToNotion", "/api/notion-create"];
-      let lastErr = null;
-
-      for (const p of candidates){
-        try{
-          const res = await postJson(p, payload);
-          if (res.data && res.data.ok) return { api: p, result: res.data };
-          // endpoint는 있는데 ok:false면 에러 그대로 반환
-          if (res.data && res.data.error) {
-            lastErr = { api: p, err: res.data };
-          } else {
-            lastErr = { api: p, err: { ok:false, error:"Unknown error" } };
-          }
-        }catch(e){
-          lastErr = { api: p, err: { ok:false, error: e?.message || "Request failed" } };
-        }
-      }
-
-      return { api: (lastErr && lastErr.api) || "-", error: (lastErr && lastErr.err) || { ok:false, error:"Save failed" } };
-    }
-
-    // Save
     $("saveBtn").addEventListener("click", async () => {
       const url = $("contentUrl").value.trim();
-      const title = $("title").value.trim();
-      const contentId = getContentIdFromUrl(url);
-
-      if(!url){
-        setToast("작품 URL을 붙여넣어 주세요.", "err");
-        return;
-      }
-
-      // URL 검증
-      try { new URL(url); }
-      catch {
-        setToast("URL 형식이 올바르지 않아요.", "err");
-        return;
-      }
-
-      // 카카오페이지 도메인/형식 검증(너무 엄격하진 않게)
-      if(!url.includes("page.kakao.com")){
-        setToast("카카오페이지 URL이 맞는지 확인해 주세요. (page.kakao.com)", "err");
-        return;
-      }
-      if(!contentId){
-        setToast("작품 상세 페이지 URL이어야 해요. 예: https://page.kakao.com/content/12345678", "err");
-        return;
-      }
+      if(!url) return setToast("작품 URL을 붙여넣어 주세요.", "err");
+      try { new URL(url); } catch { return setToast("URL 형식이 올바르지 않아요.", "err"); }
 
       setToast("노션에 저장 중…");
 
       const payload = {
-        // 제목은 없으면 URL만이라도 저장되도록 최소값만 보냄
-        title: title || `카카오페이지 작품 (${contentId})`,
         platform: "카카오페이지",
-        url: url,
-        // 아래는 지금 단계에서는 자동 수집이 어려워서 비워둠
-        coverUrl: "",
-        author: "",
-        genre: "",
-        ageGrade: null,
-        // 추후 확장 대비
-        kakaoContentId: contentId
+        url
       };
 
-      const saved = await saveToNotion(payload);
-
-      // 표시 업데이트
-      const pills = $("parsed").querySelectorAll(".pill");
-      if (pills[1]) pills[1].textContent = "저장 API: " + (saved.api || "-");
-
-      if (saved.result && saved.result.ok){
-        setToast(`저장 완료! (pageId: ${saved.result.pageId})`, "ok");
+      const res = await postJson("/api/notion-create", payload);
+      if (res.data && res.data.ok){
+        setToast(`저장 완료! (pageId: ${res.data.pageId})`, "ok");
       } else {
-        const msg = saved.error?.error ? String(saved.error.error) : "노션 저장 실패";
-        setToast(`저장 실패: ${msg}`, "err");
+        setToast(`저장 실패: ${res.data?.error || "unknown"}`, "err");
       }
     });
-
-    // 초기
-    updateParsed();
   </script>
 </body>
 </html>
