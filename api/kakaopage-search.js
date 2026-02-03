@@ -1,5 +1,37 @@
 // api/kakaopage-search.js
 // GET /api/kakaopage-search?q=검색어
+// fetch 없이 https로 호출 (Node 버전 상관없이 동작)
+
+const https = require("https");
+
+function postJson(url, payload) {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify(payload);
+    const u = new URL(url);
+
+    const req = https.request(
+      {
+        hostname: u.hostname,
+        path: u.pathname + (u.search || ""),
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "content-length": Buffer.byteLength(data),
+        },
+      },
+      (res) => {
+        let body = "";
+        res.setEncoding("utf8");
+        res.on("data", (chunk) => (body += chunk));
+        res.on("end", () => resolve({ status: res.statusCode, body }));
+      }
+    );
+
+    req.on("error", reject);
+    req.write(data);
+    req.end();
+  });
+}
 
 module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -42,23 +74,29 @@ module.exports = async function handler(req, res) {
       }
     };
 
-    const r = await fetch(url, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ query, variables }),
-    });
+    const upstream = await postJson(url, { query, variables });
 
-    if (!r.ok) {
-      const text = await r.text();
+    if (!upstream.status || upstream.status < 200 || upstream.status >= 300) {
       return res.status(502).json({
         ok: false,
         error: "KakaoPage upstream error",
-        detail: text.slice(0, 500),
+        status: upstream.status,
+        detail: String(upstream.body || "").slice(0, 500),
       });
     }
 
-    const data = await r.json();
-    const list = (data && data.data && data.data.searchKeyword && data.data.searchKeyword.list) ? data.data.searchKeyword.list : [];
+    let data;
+    try {
+      data = JSON.parse(upstream.body);
+    } catch (e) {
+      return res.status(502).json({
+        ok: false,
+        error: "Upstream returned non-JSON",
+        detail: String(upstream.body || "").slice(0, 500),
+      });
+    }
+
+    const list = data?.data?.searchKeyword?.list || [];
 
     const detectContentType = (it) => {
       const meta = []
@@ -79,7 +117,6 @@ module.exports = async function handler(req, res) {
       const row2 = Array.isArray(it?.row2) ? it.row2 : [];
       const genre = row2[0] || "";
       const author = row2[1] || "";
-
       const link = seriesId ? `https://page.kakao.com/content/${seriesId}` : (it?.scheme || "");
       const contentType = detectContentType(it);
 
