@@ -1,13 +1,3 @@
-// api/notion-create.js
-// POST /api/notion-create
-// body: { platform, url }
-// - 카카오페이지 작품 페이지에서 og:title/og:image/og:description 시도
-// - 노션 저장 시:
-//   1) DB 속성 '표지(files)' 채움
-//   2) 페이지 cover 설정 (갤러리 '페이지 커버'에서 보임)
-//   3) 페이지 본문 첫 블록에 이미지 삽입 (갤러리 '페이지 콘텐츠'에서 보임)
-// - 외부 이미지가 노션에서 안 뜨는 경우가 많아 imageProxy로 감쌈
-
 const https = require("https");
 const zlib = require("zlib");
 
@@ -103,7 +93,6 @@ function extractContentId(url) {
 }
 
 function getBaseUrl(req) {
-  // Vercel에서 현재 도메인 기준으로 프록시 URL 만들기
   const proto = (req.headers["x-forwarded-proto"] || "https").toString();
   const host = (req.headers["x-forwarded-host"] || req.headers.host || "").toString();
   return `${proto}://${host}`;
@@ -128,11 +117,19 @@ module.exports = async function handler(req, res) {
     const url = String(body.url || "").trim();
     const platform = String(body.platform || "카카오페이지").trim();
 
+    // ✅ 위젯에서 사용자가 입력해 줄 수 있는 필드들(입력되면 그대로 저장)
+    const inputTitle = String(body.title || "").trim();
+    const author = String(body.author || "").trim();
+    const publisher = String(body.publisher || "").trim();
+    const genre = String(body.genre || "").trim();
+    const keywords = Array.isArray(body.keywords) ? body.keywords.map(String).map(s => s.trim()).filter(Boolean) : [];
+    const inputDesc = String(body.desc || "").trim();
+
     if (!url) return res.status(400).json({ ok: false, error: "Missing url" });
 
     const contentId = extractContentId(url);
 
-    // 1) 카카오페이지 HTML에서 OG 추출 시도
+    // 1) OG 메타 시도 (서버에서 접근 가능한 범위 내)
     let ogTitle = "";
     let ogImage = "";
     let ogDesc = "";
@@ -145,44 +142,54 @@ module.exports = async function handler(req, res) {
       ogDesc  = pickMeta(html, "og:description") || pickNameDesc(html);
     }
 
-    // 2) fallback 값
-    const title = ogTitle || (contentId ? `카카오페이지 작품 (${contentId})` : "카카오페이지 작품");
-    const rawCoverUrl = ogImage || "";
-    const desc =
-      (ogDesc ? `${ogDesc}\n\n` : "") +
-      `카카오페이지 링크: ${url}\n` +
-      (contentId ? `작품 ID: ${contentId}\n` : "") +
-      `저장 시각: ${new Date().toISOString()}`;
+    // 2) 제목 우선순위: 사용자 입력 > og:title > fallback
+    const title = inputTitle || ogTitle || (contentId ? `카카오페이지 작품 (${contentId})` : "카카오페이지 작품");
 
-    // ✅ 노션이 외부 이미지 핫링크를 못 불러오는 경우가 있어서 프록시로 감쌈
-    // imageProxy가 이미 있으면 그 엔드포인트를 활용하면 되고,
-    // 없으면 아래 2번 파일(imageProxy.js)도 추가/교체해줘.
+    // 3) 작품 소개 우선순위: 사용자 입력 > og:description > (없으면 빈 값)
+    // ✅ 요청대로 링크/ID/저장시각 같은 자동 문구는 넣지 않음
+    const desc = inputDesc || ogDesc || "";
+
+    // 4) 표지 URL (가능하면 OG에서)
+    const rawCoverUrl = ogImage || "";
+
+    // ✅ 노션 이미지 표시 안정화를 위해 프록시 URL을 우선 사용
     const baseUrl = getBaseUrl(req);
     const proxiedCoverUrl = rawCoverUrl
       ? `${baseUrl}/api/imageProxy?url=${encodeURIComponent(rawCoverUrl)}`
       : "";
 
-    // 3) Notion properties (네 속성명)
+    // 5) Notion properties (네 속성명)
     const properties = {
       "제목": { title: [{ text: { content: title } }] },
       "플랫폼": { select: { name: platform } },
       "URL": { url },
-      "작품 소개": { rich_text: [{ text: { content: desc } }] },
     };
 
-    // DB 속성 "표지(files)"에 넣기
+    if (author) properties["작가명"] = { rich_text: [{ text: { content: author } }] };
+    if (publisher) properties["출판사명"] = { rich_text: [{ text: { content: publisher } }] };
+    if (genre) properties["장르"] = { select: { name: genre } };
+    if (keywords.length) properties["키워드"] = { multi_select: keywords.map(k => ({ name: k })) };
+
+    // 작품 소개(요청대로 자동 텍스트 없이)
+    if (desc) {
+      properties["작품 소개"] = { rich_text: [{ text: { content: desc } }] };
+    } else {
+      // 빈 값이어도 속성을 남기고 싶으면 아래 주석 해제
+      // properties["작품 소개"] = { rich_text: [] };
+    }
+
+    // ✅ 표지(files) 속성에 저장 (원하는 "표지 파일" 유지)
     if (proxiedCoverUrl) {
       properties["표지"] = {
         files: [{ name: "cover", type: "external", external: { url: proxiedCoverUrl } }]
       };
     }
 
-    // 페이지 커버(갤러리 카드에서 '페이지 커버'로 보임)
+    // ✅ 갤러리 카드용(페이지 커버/페이지 콘텐츠)도 동시에 세팅
     const pageCover = proxiedCoverUrl
       ? { type: "external", external: { url: proxiedCoverUrl } }
       : undefined;
 
-    // 페이지 본문 첫 이미지(갤러리 카드에서 '페이지 콘텐츠'로 보임)
     const children = proxiedCoverUrl
       ? [{
           object: "block",
