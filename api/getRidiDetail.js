@@ -1,7 +1,7 @@
 // api/getRidiDetail.js
 const cheerio = require("cheerio");
 
-const VERSION = "getRidiDetail-2026-02-03-v1-detail-on-demand";
+const VERSION = "getRidiDetail-2026-02-03-v2-keep-paragraphs-for-guide-desc";
 
 function absolutizeUrl(u) {
   if (!u) return "";
@@ -44,12 +44,53 @@ function findInJson(root, keyCandidates) {
   return null;
 }
 
+// ✅ 한 줄 텍스트(기존용)
 function normalizeText(v) {
   if (v == null) return "";
   return String(v)
     .replace(/\u00A0/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+// ✅ 줄바꿈(문단) 보존용: guide/description 전용
+function normalizeKeepNewlines(v) {
+  if (v == null) return "";
+  return String(v)
+    .replace(/\r\n/g, "\n")
+    .replace(/\u00A0/g, " ")
+    // 줄 끝 공백 제거
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n[ \t]+/g, "\n")
+    // 너무 많은 줄바꿈 정리
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+// ✅ DOM에서 문단 구조를 살려 텍스트 뽑기
+function textWithParagraphs($, $scope) {
+  if (!$scope || !$scope.length) return "";
+
+  const $clone = $scope.clone();
+
+  // br은 줄바꿈
+  $clone.find("br").replaceWith("\n");
+
+  // 문단/리스트 단위 뒤에 빈 줄(문단 구분)
+  $clone.find("p, li").each((_, el) => {
+    $(el).append("\n\n");
+  });
+
+  // div가 실제 문단처럼 쓰이는 경우가 있어 빈 줄을 약하게 추가(너무 큰 덩어리는 제외)
+  $clone.find("div").each((_, el) => {
+    const t = normalizeText($(el).text());
+    if (t && t.length > 0 && t.length < 600) {
+      $(el).append("\n\n");
+    }
+  });
+
+  const raw = $clone.text();
+  return normalizeKeepNewlines(raw);
 }
 
 function cleanTitle(s) {
@@ -125,14 +166,15 @@ function toNumberSafe(v) {
   return Number.isFinite(n) ? n : null;
 }
 
-function cleanSectionText(s) {
-  return normalizeText(s)
+function cleanSectionTextKeepNewlines(s) {
+  // "더보기/접기" 제거 + 줄바꿈 유지
+  return normalizeKeepNewlines(s)
     .replace(/\s*더보기\s*$/g, "")
     .replace(/\s*접기\s*$/g, "")
     .trim();
 }
 
-// 섹션: "작품 소개", "로맨스 가이드"
+// ✅ 섹션: "작품 소개", "로맨스 가이드" — 문단 유지 버전
 function extractSectionByHeading($, headingCandidates, minLen = 80) {
   const candidates = headingCandidates.map(h => normalizeText(h));
   const all = $("body *").toArray();
@@ -158,7 +200,7 @@ function extractSectionByHeading($, headingCandidates, minLen = 80) {
 
   let next = $h.next();
   let steps = 0;
-  while (next && next.length && steps < 8) {
+  while (next && next.length && steps < 10) {
     scopes.push(next);
     next = next.next();
     steps++;
@@ -167,7 +209,9 @@ function extractSectionByHeading($, headingCandidates, minLen = 80) {
   let best = "";
   for (const $scope of scopes) {
     if (!$scope || !$scope.length) continue;
-    const txt = cleanSectionText($scope.text());
+
+    // ✅ 핵심: textWithParagraphs로 문단 살리기
+    const txt = cleanSectionTextKeepNewlines(textWithParagraphs($, $scope));
     if (!txt) continue;
 
     let cleaned = txt;
@@ -316,14 +360,14 @@ async function fetchDetailAndExtract(bookLink) {
   let debugPublisherFrom = "none";
   let debugRatingFrom = "none";
 
-  // 1) next_data
+  // 1) next_data (✅ guide/desc는 줄바꿈 보존)
   if (next) {
     const descVal = findInJson(next, [
       "description", "bookDescription", "synopsis", "summary",
       "intro", "introduction", "productDescription", "fullDescription"
     ]);
     if (descVal) {
-      description = normalizeText(descVal);
+      description = normalizeKeepNewlines(descVal); // ✅ 변경
       debugDescFrom = "next_data";
     }
 
@@ -332,7 +376,7 @@ async function fetchDetailAndExtract(bookLink) {
       "guide", "contentGuide"
     ]);
     if (guideVal) {
-      guide = normalizeText(guideVal);
+      guide = normalizeKeepNewlines(guideVal); // ✅ 변경
       debugGuideFrom = "next_data";
     }
 
@@ -375,7 +419,7 @@ async function fetchDetailAndExtract(bookLink) {
     tags = normalizeTags(keywordVal);
   }
 
-  // 2) DOM 섹션 (소개/가이드)
+  // 2) DOM 섹션 (소개/가이드) — ✅ 문단 유지
   const domDesc = extractSectionByHeading($, ["작품 소개", "작품소개", "책 소개", "줄거리", "소개"], 120);
   if (domDesc) {
     description = domDesc;
@@ -448,14 +492,14 @@ async function fetchDetailAndExtract(bookLink) {
     }
   }
 
-  // 5) og:description fallback
+  // 5) og:description fallback (✅ 줄바꿈은 원래 거의 없지만 일관 처리)
   if (!description) {
     const ogDesc =
       $('meta[property="og:description"]').attr("content") ||
       $('meta[name="description"]').attr("content") ||
       "";
     if (ogDesc) {
-      description = normalizeText(ogDesc);
+      description = normalizeKeepNewlines(ogDesc);
       debugDescFrom = "og_description";
     }
   }
@@ -466,6 +510,10 @@ async function fetchDetailAndExtract(bookLink) {
     const merged = [...tags, ...ldTags];
     tags = Array.from(new Set(merged)).slice(0, 12);
   }
+
+  // 마지막 정리(줄바꿈 과다 제거)
+  description = normalizeKeepNewlines(description);
+  guide = normalizeKeepNewlines(guide);
 
   return {
     titleFromDetail,
@@ -510,8 +558,6 @@ module.exports = async (req, res) => {
 
   try {
     const d = await fetchDetailAndExtract(bookLink);
-
-    // title은 detail 우선
     const title = d.titleFromDetail || "";
 
     return res.status(200).json({
