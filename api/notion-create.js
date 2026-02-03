@@ -1,17 +1,126 @@
 // api/notion-create.js
 // POST /api/notion-create
-// body 예시:
-// {
-//   "title": "카카오페이지 작품 (65171279)",
-//   "platform": "카카오페이지",
-//   "url": "https://page.kakao.com/content/65171279",
-//   "coverUrl": "",               // 선택
-//   "author": "",                 // 선택
-//   "publisher": "",              // 선택
-//   "genre": "",                  // 선택 (select)
-//   "keywords": [],               // 선택 (multi-select) 예: ["로맨스", "현대물"]
-//   "desc": ""                    // 선택 (rich_text)
-// }
+// - URL만 줘도: 카카오페이지 content 페이지 HTML에서 og:title / og:image / og:description을 최대한 추출
+// - Notion 속성명: 플랫폼(select), 표지(files), 작가명(rich_text), 출판사명(rich_text), 장르(select), 키워드(multi-select), URL(url), 작품 소개(rich_text)
+// - 제목 속성은 스샷 기준 "제목"으로 저장
+
+const https = require("https");
+
+function getWithRedirect(url, maxRedirects = 5) {
+  return new Promise((resolve, reject) => {
+    const doReq = (currentUrl, left) => {
+      const u = new URL(currentUrl);
+
+      const req = https.request(
+        {
+          hostname: u.hostname,
+          path: u.pathname + (u.search || ""),
+          method: "GET",
+          headers: {
+            // 카카오페이지가 봇/서버 호출을 민감하게 보는 편이라 브라우저 UA를 넣어줌
+            "user-agent":
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "accept-language": "ko-KR,ko;q=0.9,en-US;q=0.7,en;q=0.6",
+            "referer": "https://page.kakao.com/",
+          },
+        },
+        (res) => {
+          const status = res.statusCode || 0;
+          const location = res.headers && res.headers.location ? String(res.headers.location) : "";
+
+          // Redirect follow
+          if ([301, 302, 303, 307, 308].includes(status) && location && left > 0) {
+            const nextUrl = new URL(location, currentUrl).toString();
+            return doReq(nextUrl, left - 1);
+          }
+
+          let body = "";
+          res.setEncoding("utf8");
+          res.on("data", (chunk) => (body += chunk));
+          res.on("end", () => resolve({ status, body, location }));
+        }
+      );
+
+      req.on("error", reject);
+      req.end();
+    };
+
+    doReq(url, maxRedirects);
+  });
+}
+
+function pickMeta(html, key) {
+  // og:title / og:image / og:description 우선
+  // property="og:title" content="..."
+  const re1 = new RegExp(
+    `<meta[^>]+property=["']${key}["'][^>]+content=["']([^"']+)["'][^>]*>`,
+    "i"
+  );
+  const m1 = html.match(re1);
+  if (m1 && m1[1]) return decodeHtml(m1[1]);
+
+  // name="description" content="..."
+  if (key === "description") {
+    const re2 = /<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["'][^>]*>/i;
+    const m2 = html.match(re2);
+    if (m2 && m2[1]) return decodeHtml(m2[1]);
+  }
+
+  return "";
+}
+
+function decodeHtml(s) {
+  return String(s || "")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#039;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">");
+}
+
+function extractContentId(url) {
+  try {
+    const u = new URL(url);
+    const m = u.pathname.match(/\/content\/(\d+)/);
+    return m ? m[1] : "";
+  } catch {
+    return "";
+  }
+}
+
+async function enrichFromKakaoPage(url) {
+  // 카카오페이지에서 HTML 자체가 막히거나(302) JS 렌더링이면 빈 값이 나올 수 있음
+  try {
+    const r = await getWithRedirect(url, 6);
+    if (!r.status || r.status < 200 || r.status >= 300) {
+      return { ok: false, reason: `upstream_status_${r.status}` };
+    }
+
+    const html = r.body || "";
+    // og 메타
+    const ogTitle = pickMeta(html, "og:title");
+    const ogImage = pickMeta(html, "og:image");
+    const ogDesc = pickMeta(html, "og:description");
+
+    // fallback: title 태그
+    let title = ogTitle;
+    if (!title) {
+      const m = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+      if (m && m[1]) title = decodeHtml(m[1]).trim();
+    }
+
+    // 간단 정리
+    return {
+      ok: true,
+      title: (title || "").trim(),
+      coverUrl: (ogImage || "").trim(),
+      desc: (ogDesc || "").trim(),
+    };
+  } catch {
+    return { ok: false, reason: "fetch_failed" };
+  }
+}
 
 module.exports = async function handler(req, res) {
   // CORS
@@ -31,121 +140,100 @@ module.exports = async function handler(req, res) {
 
   try {
     const body = (typeof req.body === "string") ? JSON.parse(req.body) : (req.body || {});
-    const title = String(body.title || "").trim();
-    const platform = String(body.platform || "카카오페이지").trim();
     const url = String(body.url || "").trim();
-    const coverUrl = String(body.coverUrl || "").trim();
-    const author = String(body.author || "").trim();
-    const publisher = String(body.publisher || "").trim();
-    const genre = String(body.genre || "").trim();
-    const keywords = Array.isArray(body.keywords) ? body.keywords.map(String).map(s => s.trim()).filter(Boolean) : [];
-    const desc = String(body.desc || "").trim();
+    const platform = String(body.platform || "카카오페이지").trim();
 
-    if (!title) return res.status(400).json({ ok: false, error: "Missing title" });
+    // 사용자가 입력한 값(있으면 우선)
+    let title = String(body.title || "").trim();
+    let coverUrl = String(body.coverUrl || "").trim();
+    let author = String(body.author || "").trim();
+    let publisher = String(body.publisher || "").trim();
+    let genre = String(body.genre || "").trim();
+    const keywords = Array.isArray(body.keywords) ? body.keywords.map(String).map(s => s.trim()).filter(Boolean) : [];
+    let desc = String(body.desc || "").trim();
+
     if (!url) return res.status(400).json({ ok: false, error: "Missing url" });
 
-    // ✅ 네 노션 DB 속성명에 맞춘 매핑
-    // - 플랫폼 (select)
-    // - 표지 (files)
-    // - 작가명 (rich_text)
-    // - 출판사명 (rich_text)
-    // - 장르 (select)
-    // - 키워드 (multi-select)
-    // - URL (URL)
-    // - 작품 소개 (rich_text)
-    //
-    // ⚠️ 문제: Title(제목) 속성 이름을 사용자가 안 적어줬음.
-    // 보통 "제목" 또는 "이름"이어서 두 개를 순서대로 시도함.
+    // ✅ URL 기반 자동 보강(제목/표지/소개)
+    // - title/cover/desc가 비어 있을 때만 채움
+    const contentId = extractContentId(url);
+    const needsEnrich = (!title || !coverUrl || !desc);
 
-    const makeProperties = (titlePropName) => {
-      const props = {};
-
-      // Title (제목/이름 중 하나)
-      props[titlePropName] = { title: [{ text: { content: title } }] };
-
-      // 플랫폼 (select)
-      if (platform) props["플랫폼"] = { select: { name: platform } };
-
-      // URL (url)
-      props["URL"] = { url };
-
-      // 작가명 (rich_text)
-      if (author) props["작가명"] = { rich_text: [{ text: { content: author } }] };
-
-      // 출판사명 (rich_text)
-      if (publisher) props["출판사명"] = { rich_text: [{ text: { content: publisher } }] };
-
-      // 장르 (select)
-      if (genre) props["장르"] = { select: { name: genre } };
-
-      // 키워드 (multi-select)
-      if (keywords.length) props["키워드"] = { multi_select: keywords.map(k => ({ name: k })) };
-
-      // 표지 (files)
-      // Notion files 속성은 external URL로 넣을 수 있어 (이미지 URL이어야 잘 보임)
-      if (coverUrl) {
-        props["표지"] = {
-          files: [
-            {
-              name: "cover",
-              type: "external",
-              external: { url: coverUrl }
-            }
-          ]
-        };
+    if (needsEnrich) {
+      const enriched = await enrichFromKakaoPage(url);
+      if (enriched.ok) {
+        if (!title && enriched.title) title = enriched.title;
+        if (!coverUrl && enriched.coverUrl) coverUrl = enriched.coverUrl;
+        if (!desc && enriched.desc) desc = enriched.desc;
       }
+    }
 
-      // 작품 소개 (rich_text)
-      // 지금은 자동으로 본문을 가져오기 어렵기 때문에,
-      // 최소로 URL과 메모를 넣어두는 형태가 안정적.
-      const defaultDesc =
+    // 그래도 제목이 없으면 fallback
+    if (!title) {
+      title = contentId ? `카카오페이지 작품 (${contentId})` : "카카오페이지 작품";
+    }
+
+    // 작품 소개 기본값(아무것도 못 가져온 경우라도 최소 기록)
+    if (!desc) {
+      desc =
         `카카오페이지 링크: ${url}\n` +
+        (contentId ? `작품 ID: ${contentId}\n` : "") +
         `저장 시각: ${new Date().toISOString()}`;
+    } else {
+      // 가져온 소개 + 링크/ID도 같이 남겨두기(나중에 검색/확인 편함)
+      desc =
+        `${desc}\n\n` +
+        `카카오페이지 링크: ${url}\n` +
+        (contentId ? `작품 ID: ${contentId}\n` : "");
+    }
 
-      props["작품 소개"] = {
-        rich_text: [{ text: { content: desc || defaultDesc } }]
-      };
-
-      return props;
+    // ✅ Notion properties (네 속성명에 맞춤)
+    const properties = {
+      "제목": { title: [{ text: { content: title } }] },
+      "플랫폼": { select: { name: platform } },
+      "URL": { url },
+      "작가명": author ? { rich_text: [{ text: { content: author } }] } : undefined,
+      "출판사명": publisher ? { rich_text: [{ text: { content: publisher } }] } : undefined,
+      "장르": genre ? { select: { name: genre } } : undefined,
+      "키워드": keywords.length ? { multi_select: keywords.map(k => ({ name: k })) } : undefined,
+      "표지": coverUrl ? {
+        files: [
+          { name: "cover", type: "external", external: { url: coverUrl } }
+        ]
+      } : undefined,
+      "작품 소개": { rich_text: [{ text: { content: desc } }] }
     };
 
-    async function createPageWithTitleProp(titlePropName) {
-      const payload = {
-        parent: { database_id: NOTION_DB_ID },
-        properties: makeProperties(titlePropName)
-      };
+    // undefined 제거
+    Object.keys(properties).forEach((k) => properties[k] === undefined && delete properties[k]);
 
-      const r = await fetch("https://api.notion.com/v1/pages", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${NOTION_TOKEN}`,
-          "Content-Type": "application/json",
-          "Notion-Version": "2022-06-28"
-        },
-        body: JSON.stringify(payload)
-      });
+    const payload = {
+      parent: { database_id: NOTION_DB_ID },
+      properties
+    };
 
-      const data = await r.json();
-      return { ok: r.ok, status: r.status, data };
-    }
+    const r = await fetch("https://api.notion.com/v1/pages", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${NOTION_TOKEN}`,
+        "Content-Type": "application/json",
+        "Notion-Version": "2022-06-28"
+      },
+      body: JSON.stringify(payload)
+    });
 
-    // 1차: 제목
-    let result = await createPageWithTitleProp("제목");
+    const data = await r.json();
+    if (!r.ok) return res.status(502).json({ ok: false, error: "Notion API error", detail: data });
 
-    // 2차: 이름 (만약 제목 속성이 없다면)
-    if (!result.ok) {
-      const msg = JSON.stringify(result.data || {});
-      if (msg.includes("Could not find property") || msg.includes("property") || msg.includes("제목")) {
-        const retry = await createPageWithTitleProp("이름");
-        if (retry.ok) {
-          return res.status(200).json({ ok: true, pageId: retry.data.id, usedTitleProp: "이름" });
-        }
-        return res.status(502).json({ ok: false, error: "Notion API error", detail: retry.data });
+    return res.status(200).json({
+      ok: true,
+      pageId: data.id,
+      filled: {
+        title: !!title,
+        cover: !!coverUrl,
+        desc: !!desc
       }
-      return res.status(502).json({ ok: false, error: "Notion API error", detail: result.data });
-    }
-
-    return res.status(200).json({ ok: true, pageId: result.data.id, usedTitleProp: "제목" });
+    });
   } catch (e) {
     return res.status(500).json({ ok: false, error: e?.message || "Unknown error" });
   }
