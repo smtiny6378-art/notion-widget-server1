@@ -1,35 +1,60 @@
 // api/kakaopage-search.js
 // GET /api/kakaopage-search?q=검색어
-// fetch 없이 https로 호출 (Node 버전 상관없이 동작)
+// - https로 POST
+// - 브라우저 헤더 흉내
+// - 301/302/303/307/308 리다이렉트 따라감
+// - Location도 detail에 찍어서 디버깅 가능
 
 const https = require("https");
 
-function postJson(url, payload) {
+function postJsonFollow(url, payload, maxRedirects = 5) {
   return new Promise((resolve, reject) => {
     const data = JSON.stringify(payload);
-    const u = new URL(url);
 
-    const req = https.request(
-      {
-        hostname: u.hostname,
-        path: u.pathname + (u.search || ""),
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "content-length": Buffer.byteLength(data),
+    const doRequest = (currentUrl, redirectsLeft) => {
+      const u = new URL(currentUrl);
+
+      const req = https.request(
+        {
+          hostname: u.hostname,
+          path: u.pathname + (u.search || ""),
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "content-length": Buffer.byteLength(data),
+
+            // ✅ 브라우저처럼 보이게 하는 헤더들 (302 방지에 도움)
+            "user-agent":
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "accept": "application/json, text/plain, */*",
+            "accept-language": "ko-KR,ko;q=0.9,en-US;q=0.7,en;q=0.6",
+            "origin": "https://page.kakao.com",
+            "referer": "https://page.kakao.com/",
+          },
         },
-      },
-      (res) => {
-        let body = "";
-        res.setEncoding("utf8");
-        res.on("data", (chunk) => (body += chunk));
-        res.on("end", () => resolve({ status: res.statusCode, body }));
-      }
-    );
+        (res) => {
+          const status = res.statusCode || 0;
+          const location = res.headers && res.headers.location ? String(res.headers.location) : "";
 
-    req.on("error", reject);
-    req.write(data);
-    req.end();
+          // ✅ 리다이렉트 처리
+          if ([301, 302, 303, 307, 308].includes(status) && location && redirectsLeft > 0) {
+            const nextUrl = new URL(location, currentUrl).toString();
+            return doRequest(nextUrl, redirectsLeft - 1);
+          }
+
+          let body = "";
+          res.setEncoding("utf8");
+          res.on("data", (chunk) => (body += chunk));
+          res.on("end", () => resolve({ status, body, location }));
+        }
+      );
+
+      req.on("error", reject);
+      req.write(data);
+      req.end();
+    };
+
+    doRequest(url, maxRedirects);
   });
 }
 
@@ -74,14 +99,16 @@ module.exports = async function handler(req, res) {
       }
     };
 
-    const upstream = await postJson(url, { query, variables });
+    const upstream = await postJsonFollow(url, { query, variables }, 6);
 
+    // ✅ 200이 아니면, 어디로 리다이렉트 됐는지(location)까지 같이 보여주게 함
     if (!upstream.status || upstream.status < 200 || upstream.status >= 300) {
       return res.status(502).json({
         ok: false,
         error: "KakaoPage upstream error",
         status: upstream.status,
-        detail: String(upstream.body || "").slice(0, 500),
+        detail: (upstream.body || "").slice(0, 300),
+        location: upstream.location || ""
       });
     }
 
@@ -92,7 +119,7 @@ module.exports = async function handler(req, res) {
       return res.status(502).json({
         ok: false,
         error: "Upstream returned non-JSON",
-        detail: String(upstream.body || "").slice(0, 500),
+        detail: String(upstream.body || "").slice(0, 300),
       });
     }
 
