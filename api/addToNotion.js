@@ -27,12 +27,22 @@ function toNumberSafe(v) {
   return Number.isFinite(n) ? n : null;
 }
 
-// ✅ rich_text를 2000자 단위로 쪼개서 전체 저장
+// ✅ 노션용 텍스트: 줄바꿈 유지 + 과다 줄바꿈 정리
+function normalizeNotionText(v) {
+  if (v == null) return "";
+  return String(v)
+    .replace(/\r\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+// ✅ rich_text를 2000자 단위로 쪼개서 전체 저장(줄바꿈은 유지됨)
 function toRichTextChunks(value, chunkSize = 2000) {
   const s = value == null ? "" : String(value);
   const out = [];
   for (let i = 0; i < s.length; i += chunkSize) {
     const chunk = s.slice(i, i + chunkSize);
+    // 내부 \n은 그대로, 빈 문자열만 방지
     if (chunk.trim()) out.push({ type: "text", text: { content: chunk } });
   }
   return out.slice(0, 100);
@@ -156,8 +166,9 @@ module.exports = async (req, res) => {
   const genreArr = normalizeArray(body?.genre);
   const tagsArr = normalizeArray(body?.tags);
 
-  const guideText = (body?.guide ?? body?.romanceGuide ?? "").toString();
-  const descText = (body?.description ?? body?.meta ?? "").toString();
+  // ✅ 줄바꿈 유지 텍스트
+  const guideText = normalizeNotionText(body?.guide ?? body?.romanceGuide ?? "");
+  const descText = normalizeNotionText(body?.description ?? body?.meta ?? "");
 
   try {
     const databaseId = process.env.NOTION_DB_ID;
@@ -167,7 +178,7 @@ module.exports = async (req, res) => {
     let db = await notion.databases.retrieve({ database_id: databaseId });
     let props = db?.properties || {};
 
-    // ---- property mapping (네 DB 이름 기준) ----
+    // ---- property mapping ----
     const titleProp =
       findPropByNameAndType(props, ["제목", "title", "name", "이름"], "title") ||
       firstPropOfType(props, "title");
@@ -192,7 +203,6 @@ module.exports = async (req, res) => {
     const genreProp =
       findPropByNameAndType(props, ["장르", "genre"], "select") || null;
 
-    // ✅ 키워드 = multi_select
     const keywordsProp =
       findPropByNameAndType(props, ["키워드", "태그", "keywords"], "multi_select") || null;
 
@@ -215,10 +225,9 @@ module.exports = async (req, res) => {
     }
 
     // ---- 값 결정 ----
-    const platformValue = "RIDI";           // 플랫폼은 항상 RIDI
-    const genreValue = genreArr[0] || "";   // 장르는 1개만(Select)
+    const platformValue = "RIDI";
+    const genreValue = genreArr[0] || "";
 
-    // 키워드(Multi): tags + (성인일 때 19 추가)
     const keywordValues = isAdult
       ? Array.from(new Set([...tagsArr, "19"]))
       : Array.from(new Set(tagsArr));
@@ -241,7 +250,6 @@ module.exports = async (req, res) => {
       createdOptions.keywords = r.added;
     }
 
-    // 옵션을 추가했으면 스키마 다시 읽기
     if (createdOptions.platform.length || createdOptions.genre.length || createdOptions.keywords.length) {
       db = await notion.databases.retrieve({ database_id: databaseId });
       props = db?.properties || {};
@@ -284,12 +292,12 @@ module.exports = async (req, res) => {
       if (v) properties[genreProp] = v;
     }
 
-    // ✅ 키워드 multi_select
     if (keywordsProp && keywordValues.length) {
       const v = setMultiSelectValue(props, keywordsProp, keywordValues);
       if (v) properties[keywordsProp] = v;
     }
 
+    // ✅ 여기서 줄바꿈 포함 rich_text 저장
     if (guideProp && props[guideProp]?.type === "rich_text" && guideText.trim()) {
       properties[guideProp] = { rich_text: toRichTextChunks(guideText) };
     }
@@ -300,7 +308,6 @@ module.exports = async (req, res) => {
 
     const created = await notion.pages.create({
       parent: { database_id: databaseId },
-      // 갤러리 커버 안정화(페이지 커버)
       cover: coverUrl ? { type: "external", external: { url: coverUrl } } : undefined,
       properties,
     });
