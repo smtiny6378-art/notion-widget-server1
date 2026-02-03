@@ -1,9 +1,3 @@
-// api/notion-create.js
-// POST /api/notion-create
-// body: { platform, url }
-// - 카카오페이지 작품 페이지 HTML에서 og:title / og:image / og:description 추출
-// - gzip/deflate/br 압축 해제 지원
-
 const https = require("https");
 const zlib = require("zlib");
 
@@ -13,15 +7,13 @@ function decodeMaybeCompressed(buffer, encoding) {
     if (enc.includes("br")) return zlib.brotliDecompressSync(buffer).toString("utf8");
     if (enc.includes("gzip")) return zlib.gunzipSync(buffer).toString("utf8");
     if (enc.includes("deflate")) return zlib.inflateSync(buffer).toString("utf8");
-  } catch {
-    // 해제 실패 시 fallback
-  }
+  } catch {}
   return buffer.toString("utf8");
 }
 
 function getHtmlFollow(url, maxRedirects = 6) {
   return new Promise((resolve, reject) => {
-    const doReq = (currentUrl, left) => {
+    const doReq = (currentUrl, left, redirected) => {
       const u = new URL(currentUrl);
 
       const req = https.request(
@@ -44,7 +36,7 @@ function getHtmlFollow(url, maxRedirects = 6) {
 
           if ([301, 302, 303, 307, 308].includes(status) && location && left > 0) {
             const nextUrl = new URL(location, currentUrl).toString();
-            return doReq(nextUrl, left - 1);
+            return doReq(nextUrl, left - 1, true);
           }
 
           const chunks = [];
@@ -53,7 +45,7 @@ function getHtmlFollow(url, maxRedirects = 6) {
             const buf = Buffer.concat(chunks);
             const enc = res.headers?.["content-encoding"] || "";
             const html = decodeMaybeCompressed(buf, enc);
-            resolve({ status, html });
+            resolve({ status, finalUrl: currentUrl, redirected, html: html || "" });
           });
         }
       );
@@ -62,7 +54,7 @@ function getHtmlFollow(url, maxRedirects = 6) {
       req.end();
     };
 
-    doReq(url, maxRedirects);
+    doReq(url, maxRedirects, false);
   });
 }
 
@@ -123,12 +115,12 @@ module.exports = async function handler(req, res) {
 
     const contentId = extractContentId(url);
 
-    // 1) 카카오페이지 HTML에서 OG 추출
+    // ✅ 작품 페이지 메타 시도
     let ogTitle = "";
     let ogImage = "";
     let ogDesc = "";
-
     const upstream = await getHtmlFollow(url, 6);
+
     if (upstream.status >= 200 && upstream.status < 300) {
       const html = upstream.html || "";
       ogTitle = pickMeta(html, "og:title");
@@ -136,7 +128,7 @@ module.exports = async function handler(req, res) {
       ogDesc  = pickMeta(html, "og:description") || pickNameDesc(html);
     }
 
-    // 2) fallback 값
+    // fallback
     const title = ogTitle || (contentId ? `카카오페이지 작품 (${contentId})` : "카카오페이지 작품");
     const coverUrl = ogImage || "";
     const desc =
@@ -145,7 +137,7 @@ module.exports = async function handler(req, res) {
       (contentId ? `작품 ID: ${contentId}\n` : "") +
       `저장 시각: ${new Date().toISOString()}`;
 
-    // 3) Notion properties (네 속성명 그대로)
+    // ✅ 네 DB 속성명 그대로
     const properties = {
       "제목": { title: [{ text: { content: title } }] },
       "플랫폼": { select: { name: platform } },
@@ -159,10 +151,7 @@ module.exports = async function handler(req, res) {
       };
     }
 
-    const payload = {
-      parent: { database_id: NOTION_DB_ID },
-      properties
-    };
+    const payload = { parent: { database_id: NOTION_DB_ID }, properties };
 
     const r = await fetch("https://api.notion.com/v1/pages", {
       method: "POST",
@@ -180,7 +169,13 @@ module.exports = async function handler(req, res) {
     return res.status(200).json({
       ok: true,
       pageId: data.id,
-      scraped: { title: !!ogTitle, cover: !!coverUrl, desc: !!ogDesc }
+      debug: {
+        upstreamStatus: upstream.status,
+        finalUrl: upstream.finalUrl,
+        redirectedTo: upstream.redirected,
+        scrapedTitle: !!ogTitle,
+        scrapedCover: !!coverUrl
+      }
     });
   } catch (e) {
     return res.status(500).json({ ok: false, error: e?.message || "Unknown error" });
