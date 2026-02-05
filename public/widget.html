@@ -41,14 +41,202 @@
     <div class="ridi-frame-inner">
       <div class="cover" aria-hidden="true">
         <div class="ridi-logo" title="RIDI">
-          <div class="ridi-mark">R</div>
           <div class="ridi-word">RIDI</div>
-        </div>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RIDI Widget</title>
+    <style>
+      :root {
+        --bg: #ffffff;
+        --card: rgba(255, 255, 255, 0.92);
+        --border: rgba(0, 0, 0, 0.08);
+        --shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+        --radius: 18px;
+        --text: #111;
+        --muted: rgba(0, 0, 0, 0.55);
+      }
+
+      * { box-sizing: border-box; }
+      html, body { height: 100%; }
+      body {
+        margin: 0;
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Apple SD Gothic Neo, "Noto Sans KR", sans-serif;
+        background: transparent;
+        color: var(--text);
+      }
+
+      /* 전체 위젯 카드 */
+      .widget {
+        width: 100%;
+        max-width: 520px;
+        margin: 0 auto;
+        padding: 16px;
+      }
+
+      .bar {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 14px 14px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--card);
+        box-shadow: var(--shadow);
+      }
+
+      /* ✅ RIDI 로고(글자 이미지/박스) 크기 줄이기 */
+      .logo {
+        flex: 0 0 auto;
+        width: 54px;            /* 원래 더 컸다면 여기서 줄어듦 */
+        height: 40px;
+        border-radius: 12px;
+        background: rgba(0, 0, 0, 0.03);
+        display: grid;
+        place-items: center;
+        border: 1px solid rgba(0,0,0,0.06);
+      }
+      .logo img {
+        display: block;
+        max-width: 34px;        /* ✅ 글자 이미지 크기 */
+        max-height: 18px;
+        width: auto;
+        height: auto;
+      }
+      /* 로고가 텍스트라면(이미지 없을 때) */
+      .logo .logo-text{
+        font-weight: 800;
+        letter-spacing: 0.5px;
+        font-size: 14px;        /* ✅ RIDI 글자 크기 */
+        color: #2b66ff;
+      }
+
+      .meta {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        min-width: 0;
+        flex: 1;
+      }
+
+      .meta-top {
+        font-size: 12px;
+        color: var(--muted);
+        line-height: 1;
+      }
+
+      /* 검색 영역 */
+      .search-wrap {
+        position: relative;   /* ✅ 결과창 absolute 기준 */
+        width: 100%;
+      }
+
+      form {
+        margin: 0;
+      }
+
+      input[type="text"] {
+        width: 100%;
+        height: 40px;
+        border-radius: 14px;
+        border: 1px solid rgba(0,0,0,0.10);
+        padding: 0 14px;
+        outline: none;
+        font-size: 14px;
+        background: rgba(255,255,255,0.9);
+      }
+      input[type="text"]:focus {
+        border-color: rgba(43, 102, 255, 0.55);
+        box-shadow: 0 0 0 3px rgba(43, 102, 255, 0.12);
+      }
+
+      /* ✅ 검색 결과 창: “중앙 정렬” 핵심 */
+      .results {
+        position: absolute;
+        top: 48px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 100%;                /* 입력창과 동일 폭 */
+        max-width: 100%;
+        border-radius: 16px;
+        border: 1px solid rgba(0,0,0,0.10);
+        background: rgba(255,255,255,0.98);
+        box-shadow: 0 16px 40px rgba(0,0,0,0.14);
+        overflow: hidden;
+        display: none;
+        z-index: 50;
+      }
+
+      .results.open { display: block; }
+
+      .result-item {
+        display: flex;
+        gap: 12px;
+        padding: 12px 12px;
+        cursor: pointer;
+      }
+      .result-item:hover {
+        background: rgba(0,0,0,0.03);
+      }
+      .thumb {
+        flex: 0 0 auto;
+        width: 40px;
+        height: 56px;
+        border-radius: 10px;
+        background: rgba(0,0,0,0.06);
+        overflow: hidden;
+      }
+      .thumb img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+      }
+      .info {
+        min-width: 0;
+        flex: 1;
+      }
+      .title {
+        font-size: 13px;
+        font-weight: 700;
+        line-height: 1.25;
+        margin: 2px 0 4px;
+        overflow: hidden;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+      }
+      .sub {
+        font-size: 12px;
+        color: var(--muted);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .empty {
+        padding: 14px;
+        font-size: 13px;
+        color: var(--muted);
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="widget">
+      <div class="bar">
+        <!-- ✅ 로고 이미지가 있으면 img로 넣고, 없으면 아래 텍스트가 보여요 -->
+        <div class="logo" aria-label="RIDI">
+          <!-- 로고 이미지 파일을 쓰고 있다면 경로만 맞춰줘 (예: /ridi.png) -->
+          <!-- <img src="/ridi.png" alt="RIDI" /> -->
+          <div class="logo-text">RIDI</div>
+</div>
       </div>
 
       <div class="info">
-        <p class="title">작품 제목을 검색해 보세요</p>
-        <p class="meta">리디 · 웹소설</p>
+        <p class="meta">웹소설 · 웹툰</p>
+        <div class="meta">
+          <div class="meta-top">웹소설 · 웹툰</div>
 
         <div class="search-wrap" id="searchWrap">
           <form id="searchForm" class="search">
@@ -58,13 +246,17 @@
             </svg>
             <input id="searchInput" type="text" placeholder="제목 검색" autocomplete="off" />
           </form>
+          <div class="search-wrap">
+            <form id="searchForm" autocomplete="off">
+              <input id="searchInput" type="text" placeholder="제목 검색" />
+            </form>
 
           <div id="resultPopover" class="result-popover">
-            <div id="results" class="results"></div>
-          </div>
-        </div>
-      </div>
-    </div>
+<div id="results" class="results"></div>
+</div>
+</div>
+</div>
+</div>
   </div>
 
 <script>
@@ -163,7 +355,24 @@
         badge.className = "badge19";
         badge.textContent = "19";
         thumb.appendChild(badge);
+
+    <script>
+      // ⚠️ 아래 API 경로는 네 프로젝트에 맞게 유지/수정 필요
+      // 예: /api/searchRidi?q=키워드 형태로 이미 만들어뒀다면 그대로 OK
+      const API_URL = (q) => `/api/searchRidi?q=${encodeURIComponent(q)}`;
+
+      const $input = document.getElementById("searchInput");
+      const $results = document.getElementById("results");
+
+      let timer = null;
+      let lastQuery = "";
+
+      function openResults() {
+        $results.classList.add("open");
       }
+      function closeResults() {
+        $results.classList.remove("open");
+}
 
       const info = document.createElement("div");
       info.className = "result-info";
@@ -219,7 +428,12 @@
         }finally{
           row.style.pointerEvents="";
           row.style.opacity="";
-        }
+      function render(items) {
+        if (!items || items.length === 0) {
+          $results.innerHTML = `<div class="empty">검색 결과가 없어요.</div>`;
+          openResults();
+          return;
+}
       });
 
       resultsRoot.appendChild(row);
@@ -242,7 +456,47 @@
       if(!data?.ok){
         resultsRoot.innerHTML = `<div class="empty-msg">검색에 실패했어요</div>`;
         return;
+        $results.innerHTML = items
+          .slice(0, 8)
+          .map((it) => {
+            const title = escapeHtml(it.title ?? "");
+            const meta = escapeHtml(it.meta ?? it.platform ?? "");
+            const cover = it.coverUrl ? `<img src="${it.coverUrl}" alt="">` : "";
+            return `
+              <div class="result-item" data-link="${it.link ?? ""}">
+                <div class="thumb">${cover}</div>
+                <div class="info">
+                  <div class="title">${title}</div>
+                  <div class="sub">${meta}</div>
+                </div>
+              </div>
+            `;
+          })
+          .join("");
+
+        openResults();
       }
+
+      function escapeHtml(str) {
+        return String(str)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+      }
+
+      async function search(q) {
+        try {
+          const res = await fetch(API_URL(q));
+          const data = await res.json();
+          // data.items 형태를 가정
+          render(data.items || []);
+        } catch (e) {
+          $results.innerHTML = `<div class="empty">검색 중 오류가 발생했어요.</div>`;
+          openResults();
+        }
+}
       renderResults(data.items);
     }catch(e){
       if(e?.name==="AbortError") return;
@@ -264,4 +518,35 @@
   closePopover();
 </script>
 </body>
+
+      $input.addEventListener("input", () => {
+        const q = $input.value.trim();
+        if (q === lastQuery) return;
+        lastQuery = q;
+
+        clearTimeout(timer);
+
+        if (!q) {
+          closeResults();
+          $results.innerHTML = "";
+          return;
+        }
+
+        timer = setTimeout(() => search(q), 180);
+      });
+
+      document.addEventListener("click", (e) => {
+        // 결과창 밖 클릭하면 닫기
+        if (!e.target.closest(".search-wrap")) closeResults();
+      });
+
+      $results.addEventListener("click", (e) => {
+        const row = e.target.closest(".result-item");
+        if (!row) return;
+        const link = row.getAttribute("data-link");
+        if (link) window.open(link, "_blank", "noopener,noreferrer");
+        closeResults();
+      });
+    </script>
+  </body>
 </html>
