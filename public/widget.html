@@ -12,19 +12,66 @@
     body{margin:0; padding:16px; background:transparent; font-family:system-ui,-apple-system,"Noto Sans KR","Apple SD Gothic Neo","Malgun Gothic",sans-serif; color:var(--text);}
     .ridi-frame{border:2px solid var(--ridi); border-radius:16px; padding:6px; background:transparent;}
     .ridi-frame-inner{border:1px solid var(--line); border-radius:12px; background:var(--bg); display:flex; gap:14px; padding:14px; align-items:center;}
-    .cover{width:64px; height:64px; border-radius:12px; background:#f3f4f6; display:flex; align-items:center; justify-content:center; flex:0 0 auto;}
+
+    /* ✅ (1) 왼쪽 정사각 네모(cover) 살짝 줄이기 */
+    .cover{
+      width:56px;              /* 기존 64px → 56px */
+      height:56px;             /* 기존 64px → 56px */
+      border-radius:12px;
+      background:#f3f4f6;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      flex:0 0 auto;
+    }
+
     .ridi-logo{display:flex; align-items:center; gap:8px; user-select:none;}
     .ridi-mark{width:26px; height:26px; border-radius:8px; background:var(--ridi); color:#fff; font-weight:800; font-size:14px; display:grid; place-items:center;}
-    .ridi-word{color:var(--ridi); font-weight:900; letter-spacing:.02em; font-size:15px;}
+
+    /* ✅ (2) RIDI 글자만 살짝 줄이기 */
+    .ridi-word{
+      color:var(--ridi);
+      font-weight:900;
+      letter-spacing:.02em;
+      font-size:14px;          /* 기존 15px → 14px */
+      line-height:1;           /* 글자 세로 중심 맞추기 */
+    }
+
     .info{flex:1 1 auto; min-width:0;}
     .title{font-size:16px; font-weight:800; margin:0 0 4px;}
     .meta{font-size:12px; color:var(--muted); margin:0 0 10px;}
-    .search-wrap{position:relative; width:min(520px,100%);}
+
+    .search-wrap{
+      position:relative;
+      width:min(520px,100%);
+    }
+
     .search{display:flex; align-items:center; gap:8px; background:#f7f7fb; border:1px solid var(--line); border-radius:999px; padding:8px 12px; width:100%;}
     .search-icon{color:#9aa3af; flex:0 0 auto;}
     #searchInput{border:0; outline:0; background:transparent; width:100%; font-size:13px;}
-    .result-popover{position:absolute; left:0; right:0; top:calc(100% + 10px); background:#fff; border:1px solid var(--line); border-radius:14px;
-      box-shadow:0 18px 44px rgba(17,24,39,.12); padding:10px; z-index:50; max-height:380px; overflow:auto; display:none;}
+
+    /* ✅ (3) 결과창을 “정중앙”에 맞추기
+       - left:50% + translateX(-50%)
+       - width는 search-wrap 기준 100% 유지
+       - right:0 제거(중앙정렬과 충돌)
+    */
+    .result-popover{
+      position:absolute;
+      top:calc(100% + 10px);
+      left:50%;
+      transform:translateX(-50%);
+      width:100%;
+      background:#fff;
+      border:1px solid var(--line);
+      border-radius:14px;
+      box-shadow:0 18px 44px rgba(17,24,39,.12);
+      padding:10px;
+      z-index:50;
+      max-height:380px;
+      overflow:auto;
+      display:none;
+    }
+
     .results{display:grid; gap:10px;}
     .result-item{display:flex; gap:10px; padding:10px; border:1px solid var(--line); border-radius:12px; cursor:pointer; transition:.05s; background:#fff;}
     .result-item:hover{transform:translateY(-1px); box-shadow:0 6px 16px rgba(17,24,39,.08);}
@@ -211,7 +258,7 @@
           };
 
           await addToNotion(payload);
-          closePopover(); // 저장 후 닫기 (원하면 삭제)
+          closePopover();
         }catch(e){
           console.error("save error:", e);
         }finally{
