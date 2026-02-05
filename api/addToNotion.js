@@ -20,7 +20,6 @@ function normalizeArray(v) {
   return [];
 }
 
-// ✅ 줄바꿈 유지 + 과다 줄바꿈 정리
 function normalizeNotionText(v) {
   if (v == null) return "";
   return String(v)
@@ -116,13 +115,7 @@ function setMultiSelectValue(props, propName, values) {
   return { multi_select: arr.map((name) => ({ name })) };
 }
 
-/**
- * ✅ 문단이 "나뉘어서" 보이게 rich_text 생성
- * - 빈 줄(문단 구분)은 "\n\n"로 유지
- * - 문단마다 별도 rich_text 아이템으로 넣고,
- *   각 문단 뒤에 "\n\n"를 붙여서 Notion에서 문단처럼 보이게 함
- * - 2000자 제한 고려하여 추가로 쪼갬
- */
+// ✅ 문단이 나뉘어 보이도록 rich_text 생성
 function toRichTextParagraphs(value, chunkSize = 2000) {
   const text = normalizeNotionText(value);
   if (!text) return [];
@@ -131,10 +124,8 @@ function toRichTextParagraphs(value, chunkSize = 2000) {
 
   const out = [];
   for (let i = 0; i < paragraphs.length; i++) {
-    // 문단 사이 빈 줄 유지
     const paraWithGap = i < paragraphs.length - 1 ? paragraphs[i] + "\n\n" : paragraphs[i];
 
-    // Notion 2000자 제한 대응
     for (let j = 0; j < paraWithGap.length; j += chunkSize) {
       const chunk = paraWithGap.slice(j, j + chunkSize);
       if (chunk) out.push({ type: "text", text: { content: chunk } });
@@ -145,9 +136,22 @@ function toRichTextParagraphs(value, chunkSize = 2000) {
   return out.slice(0, 100);
 }
 
+// ✅ title이 비면 URL에서 제목 추출(19세 게이트 대응)
+function titleFromKakaoUrl(url) {
+  try {
+    const u = String(url || "").trim();
+    // /content/그녀와-야수/2760 형태
+    const m = u.match(/\/content\/([^/]+)\/(\d+)/);
+    if (!m) return "";
+    const slug = decodeURIComponent(m[1]);
+    return slug.replace(/-/g, " ").trim();
+  } catch {
+    return "";
+  }
+}
+
 // ---------------- handler ----------------
 module.exports = async (req, res) => {
-  // CORS
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -160,14 +164,16 @@ module.exports = async (req, res) => {
     try { body = JSON.parse(body); } catch {}
   }
 
-  const title = body?.title?.toString().trim();
+  const urlValue = (body?.url ?? body?.link)?.toString?.().trim?.() || "";
+  let title = body?.title?.toString().trim() || "";
+
+  // ✅ title 없으면 URL에서 보정
+  if (!title && urlValue) title = titleFromKakaoUrl(urlValue);
+
   if (!title) return res.status(400).json({ ok: false, error: "title is required" });
 
-  const urlValue = (body?.url ?? body?.link)?.toString?.().trim?.() || "";
   const coverUrl = body?.coverUrl?.toString().trim() || "";
   const isAdult = toBoolean(body?.isAdult);
-
-  // ✅ 플랫폼: body.platform 우선
   const platformValue = (body?.platform || "RIDI").toString().trim() || "RIDI";
 
   const authorName = (body?.authorName ?? body?.author ?? "").toString().trim();
@@ -176,7 +182,6 @@ module.exports = async (req, res) => {
   const genreArr = normalizeArray(body?.genre);
   const tagsArr = normalizeArray(body?.tags ?? body?.keywords);
 
-  // ✅ 카카오 위젯 desc도 수용
   const guideText = normalizeNotionText(body?.guide ?? body?.romanceGuide ?? "");
   const descText = normalizeNotionText(body?.description ?? body?.meta ?? body?.desc ?? "");
 
@@ -184,11 +189,9 @@ module.exports = async (req, res) => {
     const databaseId = process.env.NOTION_DB_ID;
     if (!databaseId) return res.status(500).json({ ok: false, error: "NOTION_DB_ID is missing" });
 
-    // 스키마 읽기
     let db = await notion.databases.retrieve({ database_id: databaseId });
     let props = db?.properties || {};
 
-    // ---- property mapping (네 DB 타입 기준) ----
     const titleProp =
       findPropByNameAndType(props, ["제목", "title", "name", "이름"], "title") ||
       firstPropOfType(props, "title");
@@ -230,39 +233,32 @@ module.exports = async (req, res) => {
       });
     }
 
-    // ---- 값 결정 ----
     const genreValue = genreArr[0] || "";
 
-    // 키워드: tags + (성인일 때 19 추가)
     const keywordValues = isAdult
       ? Array.from(new Set([...tagsArr, "19"]))
       : Array.from(new Set(tagsArr));
 
-    // ---- 옵션 자동 생성 ----
     const createdOptions = { platform: [], genre: [], keywords: [] };
 
     if (platformProp) {
       const r = await ensureSelectOption(databaseId, props, platformProp, platformValue);
       createdOptions.platform = r.added;
     }
-
     if (genreProp && genreValue) {
       const r = await ensureSelectOption(databaseId, props, genreProp, genreValue);
       createdOptions.genre = r.added;
     }
-
     if (keywordsProp && keywordValues.length) {
       const r = await ensureMultiSelectOptions(databaseId, props, keywordsProp, keywordValues);
       createdOptions.keywords = r.added;
     }
 
-    // 옵션 추가했으면 스키마 다시 읽기
     if (createdOptions.platform.length || createdOptions.genre.length || createdOptions.keywords.length) {
       db = await notion.databases.retrieve({ database_id: databaseId });
       props = db?.properties || {};
     }
 
-    // ---- properties 구성 ----
     const properties = {
       [titleProp]: { title: [{ type: "text", text: { content: title.slice(0, 2000) } }] },
     };
@@ -300,7 +296,6 @@ module.exports = async (req, res) => {
       if (v) properties[keywordsProp] = v;
     }
 
-    // ✅ 속성 칸에만 저장 + 문단 유지
     if (guideProp && props[guideProp]?.type === "rich_text" && guideText.trim()) {
       properties[guideProp] = { rich_text: toRichTextParagraphs(guideText) };
     }
@@ -318,26 +313,10 @@ module.exports = async (req, res) => {
     return res.status(200).json({
       ok: true,
       pageId: created.id,
-      mapped: {
-        titleProp,
-        platformProp,
-        coverProp,
-        authorProp,
-        publisherProp,
-        genreProp,
-        keywordsProp,
-        urlProp,
-        guideProp,
-        descProp,
-      },
       createdOptions,
       usedValues: { platformValue, genreValue, keywordValues },
     });
   } catch (e) {
-    return res.status(500).json({
-      ok: false,
-      error: e?.message || "Unknown error",
-      details: e?.body || null,
-    });
+    return res.status(500).json({ ok: false, error: e?.message || "Unknown error", details: e?.body || null });
   }
 };
