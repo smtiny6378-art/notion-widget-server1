@@ -140,7 +140,6 @@ function toRichTextParagraphs(value, chunkSize = 2000) {
 function titleFromKakaoUrl(url) {
   try {
     const u = String(url || "").trim();
-    // /content/그녀와-야수/2760 형태
     const m = u.match(/\/content\/([^/]+)\/(\d+)/);
     if (!m) return "";
     const slug = decodeURIComponent(m[1]);
@@ -150,30 +149,37 @@ function titleFromKakaoUrl(url) {
   }
 }
 
-// ---------------- handler ----------------
-module.exports = async (req, res) => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-
-  if (req.method === "OPTIONS") return res.status(200).end();
-  if (req.method !== "POST") return res.status(405).end();
-
+function safeJsonBody(req) {
   let body = req.body;
   if (typeof body === "string") {
     try { body = JSON.parse(body); } catch {}
   }
+  return body || {};
+}
+
+// ---------------- core: create one page ----------------
+async function createOne(body, ctx) {
+  const {
+    databaseId,
+    props,
+    titleProp,
+    platformProp,
+    coverProp,
+    authorProp,
+    publisherProp,
+    genreProp,
+    keywordsProp,
+    urlProp,
+    guideProp,
+    descProp,
+  } = ctx;
 
   const urlValue = (body?.url ?? body?.link)?.toString?.().trim?.() || "";
   let title = body?.title?.toString().trim() || "";
-
-  // ✅ title 없으면 URL에서 보정
   if (!title && urlValue) title = titleFromKakaoUrl(urlValue);
+  if (!title) return { ok: false, error: "title is required" };
 
-  if (!title) return res.status(400).json({ ok: false, error: "title is required" });
-
-  const coverUrl = body?.coverUrl?.toString().trim() || "";
-  const isAdult = toBoolean(body?.isAdult);
+  const coverUrl = body?.coverUrl?.toString?.().trim?.() || "";
   const platformValue = (body?.platform || "RIDI").toString().trim() || "RIDI";
 
   const authorName = (body?.authorName ?? body?.author ?? "").toString().trim();
@@ -185,10 +191,103 @@ module.exports = async (req, res) => {
   const guideText = normalizeNotionText(body?.guide ?? body?.romanceGuide ?? "");
   const descText = normalizeNotionText(body?.description ?? body?.meta ?? body?.desc ?? "");
 
+  const genreValue = genreArr[0] || "";
+  const keywordValues = Array.from(new Set(tagsArr)); // tags만 사용 (19 자동 추가 ❌)
+
+  // 옵션 ensure(필요한 것만)
+  const createdOptions = { platform: [], genre: [], keywords: [] };
+
+  if (platformProp) {
+    const r = await ensureSelectOption(databaseId, props, platformProp, platformValue);
+    createdOptions.platform = r.added;
+  }
+  if (genreProp && genreValue) {
+    const r = await ensureSelectOption(databaseId, props, genreProp, genreValue);
+    createdOptions.genre = r.added;
+  }
+  if (keywordsProp && keywordValues.length) {
+    const r = await ensureMultiSelectOptions(databaseId, props, keywordsProp, keywordValues);
+    createdOptions.keywords = r.added;
+  }
+
+  const properties = {
+    [titleProp]: { title: [{ type: "text", text: { content: title.slice(0, 2000) } }] },
+  };
+
+  if (platformProp) {
+    const v = setSelectValue(props, platformProp, platformValue);
+    if (v) properties[platformProp] = v;
+  }
+
+  if (urlProp && props[urlProp]?.type === "url" && urlValue) {
+    properties[urlProp] = { url: urlValue };
+  }
+
+  if (coverProp && props[coverProp]?.type === "files" && coverUrl) {
+    properties[coverProp] = {
+      files: [{ type: "external", name: "cover", external: { url: coverUrl } }],
+    };
+  }
+
+  // ✅ 여기 때문에 "카카오페이지는 최소 / 카카오웹툰은 상세"가 자동 유지됨
+  if (authorProp && props[authorProp]?.type === "rich_text" && authorName) {
+    properties[authorProp] = { rich_text: toRichTextParagraphs(authorName) };
+  }
+
+  if (publisherProp && props[publisherProp]?.type === "rich_text" && publisherName) {
+    properties[publisherProp] = { rich_text: toRichTextParagraphs(publisherName) };
+  }
+
+  if (genreProp && genreValue) {
+    const v = setSelectValue(props, genreProp, genreValue);
+    if (v) properties[genreProp] = v;
+  }
+
+  if (keywordsProp && keywordValues.length) {
+    const v = setMultiSelectValue(props, keywordsProp, keywordValues);
+    if (v) properties[keywordsProp] = v;
+  }
+
+  if (guideProp && props[guideProp]?.type === "rich_text" && guideText.trim()) {
+    properties[guideProp] = { rich_text: toRichTextParagraphs(guideText) };
+  }
+
+  if (descProp && props[descProp]?.type === "rich_text" && descText.trim()) {
+    properties[descProp] = { rich_text: toRichTextParagraphs(descText) };
+  }
+
+  const created = await notion.pages.create({
+    parent: { database_id: databaseId },
+    cover: coverUrl ? { type: "external", external: { url: coverUrl } } : undefined,
+    properties,
+  });
+
+  return {
+    ok: true,
+    pageId: created.id,
+    createdOptions,
+    usedValues: { platformValue, genreValue, keywordValues },
+    title,
+    url: urlValue,
+  };
+}
+
+// ---------------- handler ----------------
+module.exports = async (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+  if (req.method === "OPTIONS") return res.status(200).end();
+  if (req.method !== "POST") return res.status(405).end();
+
+  const body = safeJsonBody(req);
+
   try {
     const databaseId = process.env.NOTION_DB_ID;
     if (!databaseId) return res.status(500).json({ ok: false, error: "NOTION_DB_ID is missing" });
 
+    // DB props 한번만 읽기
     let db = await notion.databases.retrieve({ database_id: databaseId });
     let props = db?.properties || {};
 
@@ -233,89 +332,60 @@ module.exports = async (req, res) => {
       });
     }
 
-    const genreValue = genreArr[0] || "";
-
-// 키워드: tags만 사용 (19 자동 추가 ❌)
-const keywordValues = Array.from(new Set(tagsArr));
-
-    const createdOptions = { platform: [], genre: [], keywords: [] };
-
-    if (platformProp) {
-      const r = await ensureSelectOption(databaseId, props, platformProp, platformValue);
-      createdOptions.platform = r.added;
-    }
-    if (genreProp && genreValue) {
-      const r = await ensureSelectOption(databaseId, props, genreProp, genreValue);
-      createdOptions.genre = r.added;
-    }
-    if (keywordsProp && keywordValues.length) {
-      const r = await ensureMultiSelectOptions(databaseId, props, keywordsProp, keywordValues);
-      createdOptions.keywords = r.added;
-    }
-
-    if (createdOptions.platform.length || createdOptions.genre.length || createdOptions.keywords.length) {
-      db = await notion.databases.retrieve({ database_id: databaseId });
-      props = db?.properties || {};
-    }
-
-    const properties = {
-      [titleProp]: { title: [{ type: "text", text: { content: title.slice(0, 2000) } }] },
+    const ctx = {
+      databaseId, props, titleProp, platformProp, coverProp,
+      authorProp, publisherProp, genreProp, keywordsProp,
+      urlProp, guideProp, descProp,
     };
 
-    if (platformProp) {
-      const v = setSelectValue(props, platformProp, platformValue);
-      if (v) properties[platformProp] = v;
+    // ✅ 배치 지원: { items: [...] } 면 여러 개 저장
+    const items = Array.isArray(body?.items) ? body.items : null;
+
+    if (items && items.length) {
+      const results = [];
+      for (let i = 0; i < items.length; i++) {
+        try {
+          const r = await createOne(items[i], ctx);
+          results.push({ index: i, ...r });
+        } catch (e) {
+          results.push({
+            index: i,
+            ok: false,
+            error: e?.message || "Unknown error",
+            details: e?.body || null,
+          });
+        }
+      }
+
+      const okCount = results.filter(r => r.ok).length;
+      const failCount = results.length - okCount;
+
+      return res.status(200).json({
+        ok: failCount === 0,
+        mode: "batch",
+        total: results.length,
+        okCount,
+        failCount,
+        results,
+      });
     }
 
-    if (urlProp && props[urlProp]?.type === "url" && urlValue) {
-      properties[urlProp] = { url: urlValue };
-    }
-
-    if (coverProp && props[coverProp]?.type === "files" && coverUrl) {
-      properties[coverProp] = {
-        files: [{ type: "external", name: "cover", external: { url: coverUrl } }],
-      };
-    }
-
-    if (authorProp && props[authorProp]?.type === "rich_text" && authorName) {
-      properties[authorProp] = { rich_text: toRichTextParagraphs(authorName) };
-    }
-
-    if (publisherProp && props[publisherProp]?.type === "rich_text" && publisherName) {
-      properties[publisherProp] = { rich_text: toRichTextParagraphs(publisherName) };
-    }
-
-    if (genreProp && genreValue) {
-      const v = setSelectValue(props, genreProp, genreValue);
-      if (v) properties[genreProp] = v;
-    }
-
-    if (keywordsProp && keywordValues.length) {
-      const v = setMultiSelectValue(props, keywordsProp, keywordValues);
-      if (v) properties[keywordsProp] = v;
-    }
-
-    if (guideProp && props[guideProp]?.type === "rich_text" && guideText.trim()) {
-      properties[guideProp] = { rich_text: toRichTextParagraphs(guideText) };
-    }
-
-    if (descProp && props[descProp]?.type === "rich_text" && descText.trim()) {
-      properties[descProp] = { rich_text: toRichTextParagraphs(descText) };
-    }
-
-    const created = await notion.pages.create({
-      parent: { database_id: databaseId },
-      cover: coverUrl ? { type: "external", external: { url: coverUrl } } : undefined,
-      properties,
-    });
+    // ✅ 단일 지원(기존 호환)
+    const one = await createOne(body, ctx);
+    if (!one.ok) return res.status(400).json(one);
 
     return res.status(200).json({
       ok: true,
-      pageId: created.id,
-      createdOptions,
-      usedValues: { platformValue, genreValue, keywordValues },
+      mode: "single",
+      pageId: one.pageId,
+      createdOptions: one.createdOptions,
+      usedValues: one.usedValues,
     });
   } catch (e) {
-    return res.status(500).json({ ok: false, error: e?.message || "Unknown error", details: e?.body || null });
+    return res.status(500).json({
+      ok: false,
+      error: e?.message || "Unknown error",
+      details: e?.body || null,
+    });
   }
 };
