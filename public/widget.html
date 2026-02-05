@@ -287,6 +287,8 @@
         timer = setTimeout(() => search(q), 180);
       });
 
+      .results { width: calc(100% - 6px); }
+      
       document.addEventListener("click", (e) => {
         // 결과창 밖 클릭하면 닫기
         if (!e.target.closest(".search-wrap")) closeResults();
