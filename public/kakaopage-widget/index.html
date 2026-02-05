@@ -6,16 +6,19 @@
   <title>KakaoPage → Notion</title>
   <style>
     :root{
-      --kp-yellow: #FFE400;
-      --kp-yellow-soft: rgba(255, 228, 0, .18);
-      --text: #111;
+      --kp-yellow:#FFE400;
+      --kp-yellow-soft: rgba(255, 228, 0, .10);
+
+      --text:#111;
       --muted: rgba(0,0,0,.55);
-      --line: rgba(0,0,0,.12);
-      --line2: rgba(0,0,0,.18);
-      --ok: #0a7a2f;
-      --err: #b00020;
-      --card: rgba(255,255,255,.96);
-      --bg: transparent;
+      --line: rgba(0,0,0,.10);
+      --line2: rgba(0,0,0,.16);
+
+      --card: #ffffff;
+      --bg: #efefef;
+
+      --ok:#0a7a2f;
+      --err:#b00020;
     }
 
     *{ box-sizing:border-box; }
@@ -25,133 +28,173 @@
       background: var(--bg);
       color: var(--text);
       font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+      padding: 20px;
     }
 
-    /* ✅ 리디 위젯 느낌: 큰 컬러 테두리 */
     .frame{
       width:100%;
-      max-width: 720px;
+      max-width: 980px;
       margin: 0 auto;
-      padding: 12px;
-      border-radius: 18px;
+      padding: 14px;
+      border-radius: 22px;
       border: 2px solid rgba(255, 228, 0, .95);
-      background: rgba(255, 228, 0, .10);
+      background: var(--kp-yellow-soft);
     }
 
-    .wrap{
-      border-radius: 16px;
+    .grid{
+      display:grid;
+      grid-template-columns: 300px 1fr;
+      gap: 8px;
+    }
+
+    @media (max-width: 860px){
+      .grid{ grid-template-columns: 1fr; }
+    }
+
+    .panel{
       background: var(--card);
       border: 1px solid var(--line);
-      padding: 12px;
+      border-radius: 18px;
+      overflow:hidden;
     }
 
-    /* ✅ 상단: 좌측 로고 + 타이틀 */
-    .top{
+    /* LEFT */
+    .left{
       display:flex;
-      gap:12px;
-      align-items:center;
-      padding: 10px 10px 12px;
-      border-radius: 14px;
-      background: rgba(0,0,0,.02);
-      border: 1px solid var(--line);
+      flex-direction:column;
+      height: 100%;
+      min-height: 360px;
     }
 
-    .logo{
-      width:44px;
-      height:44px;
-      border-radius: 14px;
+    .leftTop{
+      padding: 18px 18px 12px;
+      display:flex;
+      gap: 14px;
+      align-items:center;
+    }
+
+    .kpIcon{
+      width: 64px;
+      height: 64px;
+      border-radius: 22px;
       background: var(--kp-yellow);
-      color:#111;
+      border: 1px solid rgba(0,0,0,.12);
       display:grid;
       place-items:center;
-      font-weight: 900;
-      letter-spacing: .2px;
       flex: 0 0 auto;
-      border: 1px solid rgba(0,0,0,.10);
     }
 
-    .top-right{
-      min-width: 0;
-      flex: 1 1 auto;
-    }
+    .kpIcon svg{ width: 30px; height: 30px; }
 
-    /* ✅ "카카오페이지 URL" 볼드 */
-    .title{
+    .leftTitle{
       font-weight: 900;
-      font-size: 14px;
-      line-height: 1.2;
+      font-size: 17px;
+      line-height: 1.25;
+      letter-spacing: -0.2px;
     }
 
-    .sub{
-      margin-top: 4px;
+    .leftSub{
+      margin-top: 8px;
       font-size: 12px;
       color: var(--muted);
       line-height: 1.35;
     }
 
-    /* ✅ 입력 섹션: 타이틀(볼드) + 아래 입력 박스 */
-    .section{
-      margin-top: 12px;
-      padding: 12px;
-      border-radius: 14px;
-      border: 1px solid var(--line);
-      background: rgba(0,0,0,.015);
+    .divider{
+      height:1px;
+      background: rgba(0,0,0,.06);
+      margin: 6px 18px 0;
     }
 
-    .sec-title{
-      font-weight: 900;
-      font-size: 13px;
-      margin-bottom: 8px;
+    .leftBottom{
+      margin-top: auto;
+      padding: 18px;
     }
+
+    .saveBig{
+      width:100%;
+      cursor:pointer;
+      border: none;
+      background: var(--kp-yellow);
+      color:#111;
+      font-weight: 900;
+      font-size: 15px;
+      border-radius: 14px;
+      padding: 16px 14px;
+      text-align:center;
+      user-select:none;
+      box-shadow: 0 2px 0 rgba(0,0,0,.06);
+    }
+
+    .saveBig:hover{ filter: brightness(0.98); }
+    .saveBig:disabled{ opacity:.6; cursor:not-allowed; }
+
+    /* RIGHT */
+    .right{
+      padding: 16px 16px 14px;
+      min-height: 360px;
+      display:flex;
+      flex-direction:column;
+    }
+
+    .rightHeader{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    .rightTitle{
+      font-weight: 900;
+      font-size: 14px;
+      letter-spacing: -0.2px;
+      white-space: nowrap;
+    }
+
+    .rightActions{
+      display:flex;
+      gap: 8px;
+      flex-wrap:wrap;
+      justify-content:flex-end;
+    }
+
+    .miniBtn{
+      all:unset;
+      cursor:pointer;
+      padding: 8px 12px;
+      border-radius: 12px;
+      border: 1px solid var(--line2);
+      background: #f3f3f3;
+      font-size: 12px;
+      font-weight: 800;
+      user-select:none;
+    }
+
+    .miniBtn:hover{ background: #ededed; }
+    .miniBtn:disabled{ opacity:.55; cursor:not-allowed; }
 
     textarea{
       width:100%;
-      min-height: 120px;
+      min-height: 210px;
+      flex: 1 1 auto;
       resize: vertical;
-      padding: 10px 12px;
-      border-radius: 12px;
+      padding: 12px 12px;
+      border-radius: 14px;
       border: 1px solid var(--line);
-      background: rgba(255,255,255,.98);
+      background: #fafafa;
       font-size: 13px;
       color: var(--text);
       outline: none;
     }
     textarea::placeholder{ color: rgba(0,0,0,.35); }
 
-    .btns{
-      display:flex;
-      gap:10px;
-      flex-wrap:wrap;
-      margin-top: 10px;
-      align-items:center;
-    }
-
-    button{
-      all:unset;
-      cursor:pointer;
-      padding: 10px 12px;
-      border-radius: 12px;
-      border: 1px solid var(--line2);
-      background: rgba(0,0,0,.04);
-      font-size: 13px;
-      font-weight: 800;
-      user-select:none;
-    }
-    button:hover{ background: rgba(0,0,0,.06); }
-    button:disabled{ opacity:.55; cursor:not-allowed; }
-
-    .primary{
-      background: rgba(255, 228, 0, .55);
-      border-color: rgba(255, 228, 0, .95);
-    }
-    .primary:hover{ background: rgba(255, 228, 0, .70); }
-
     .toast{
-      margin-top: 10px;
+      margin-top: 8px;
       padding: 10px 12px;
-      border-radius: 12px;
+      border-radius: 14px;
       border: 1px solid var(--line);
-      background: rgba(0,0,0,.03);
+      background: #f3f3f3;
       color: var(--muted);
       font-size: 12px;
       min-height: 40px;
@@ -163,46 +206,78 @@
     .err{ color: var(--err); }
 
     .log{
-      margin-top: 10px;
+      margin-top: 8px;
       border: 1px solid var(--line);
-      border-radius: 12px;
-      padding: 10px 12px;
-      background: rgba(0,0,0,.02);
+      border-radius: 14px;
+      padding: 0 12px;
+      background: #f7f7f7;
       font-size: 12px;
-      color: var(--text);
       line-height: 1.45;
-      max-height: 220px;
-      overflow: auto;
+
+      flex: 0 0 auto;
+      min-height: 0;
+      max-height: 0;
+      overflow: hidden;
       white-space: pre-wrap;
+
+      transition: max-height .22s ease, padding .18s ease, opacity .18s ease;
+      opacity: 0;
     }
+
+    .log.open{
+      max-height: 110px;
+      padding: 10px 12px;
+      overflow: auto;
+      opacity: 1;
+    }
+
     .log .muted{ color: var(--muted); }
   </style>
 </head>
 
 <body>
   <div class="frame">
-    <div class="wrap">
+    <div class="grid">
 
-      <div class="top">
-        <div class="logo" aria-label="KakaoPage">KP</div>
-        <div class="top-right">
-          <div class="title">카카오페이지 URL</div>
-          <div class="sub">작품 URL을 여러 줄로 붙여넣고 한 번에 저장할 수 있어요.</div>
+      <!-- LEFT PANEL -->
+      <div class="panel left">
+        <div class="leftTop">
+          <div class="kpIcon" aria-label="KakaoPage">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M6 5.5V18.5" stroke="#111" stroke-width="2.2" stroke-linecap="round"/>
+              <path d="M18 5.7L10.8 12L18 18.3" stroke="#111" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
+          <div style="min-width:0;">
+            <div class="leftTitle">카카오페이지 URL</div>
+            <div class="leftSub">오른쪽에 URL 붙여넣고 저장하세요.</div>
+          </div>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="leftBottom">
+          <button id="saveBig" class="saveBig">노션에 저장</button>
         </div>
       </div>
 
-      <div class="section">
-        <div class="sec-title">카카오페이지 URL</div>
-        <textarea id="contentUrls" placeholder="여기에 작품 URL을 붙여넣어 주세요 (줄바꿈으로 여러 개)"></textarea>
+      <!-- RIGHT PANEL -->
+      <div class="panel">
+        <div class="right">
+          <div class="rightHeader">
+            <div class="rightTitle">카카오페이지 URL</div>
+            <div class="rightActions">
+              <button class="miniBtn" id="toggleLogBtn">로그 보기</button>
+              <button class="miniBtn" id="openFirstBtn">첫 URL 열기</button>
+              <button class="miniBtn" id="clearBtn">입력 지우기</button>
+            </div>
+          </div>
 
-        <div class="btns">
-          <button class="primary" id="saveBtn">노션에 저장</button>
-          <button id="openFirstBtn">첫 번째 URL 열기</button>
-          <button id="clearBtn">입력 지우기</button>
+          <textarea id="contentUrls" placeholder="여기에 작품 URL을 줄바꿈으로 여러 개 붙여넣어 주세요"></textarea>
+
+          <div class="toast" id="toast">URL을 입력하고 왼쪽 “노션에 저장”을 눌러 보세요.</div>
+          <div class="log" id="log"><span class="muted">로그가 여기에 표시돼요.</span></div>
         </div>
-
-        <div class="toast" id="toast">URL을 입력하고 “노션에 저장”을 눌러 보세요.</div>
-        <div class="log" id="log"><span class="muted">로그가 여기에 표시돼요.</span></div>
       </div>
 
     </div>
@@ -236,7 +311,6 @@
       const lines = parseTextarea(raw);
       const trimmedNonEmpty = lines.map(s => s.trim()).filter(Boolean);
 
-      // 중복 제거(순서 유지)
       const seen = new Set();
       const unique = [];
       for (const u of trimmedNonEmpty){
@@ -274,7 +348,6 @@
         kept.push(line);
       }
 
-      // 빈줄 정리: 3줄 이상 연속 빈줄을 2줄로 제한 + 앞뒤 빈줄 제거
       const compact = [];
       let emptyRun = 0;
       for (const line of kept){
@@ -307,9 +380,31 @@
 
     function sleep(ms){ return new Promise(res => setTimeout(res, ms)); }
 
+    function lockUI(locked){
+      $("saveBig").disabled = locked;
+      $("openFirstBtn").disabled = locked;
+      $("clearBtn").disabled = locked;
+      $("toggleLogBtn").disabled = locked;
+    }
+
+    const toggleLogBtn = $("toggleLogBtn");
+    const logBox = $("log");
+
+    toggleLogBtn.addEventListener("click", () => {
+      const opened = logBox.classList.toggle("open");
+      toggleLogBtn.textContent = opened ? "로그 숨기기" : "로그 보기";
+    });
+
+    function openLogIfClosed(){
+      if (!logBox.classList.contains("open")){
+        logBox.classList.add("open");
+        toggleLogBtn.textContent = "로그 숨기기";
+      }
+    }
+
     $("openFirstBtn").addEventListener("click", () => {
       const { valid } = normalizeUrls($("contentUrls").value);
-      if (!valid.length) return setToast("먼저 작품 URL을 1개 이상 넣어 주세요.", "err");
+      if (!valid.length) return setToast("먼저 URL을 1개 이상 넣어 주세요.", "err");
       openInNewTab(valid[0]);
       setToast("첫 번째 URL을 새 탭으로 열었어요.");
     });
@@ -320,7 +415,7 @@
       setToast("입력을 지웠어요.");
     });
 
-    $("saveBtn").addEventListener("click", async () => {
+    async function runSave(){
       const raw = $("contentUrls").value;
       const { valid, invalid } = normalizeUrls(raw);
 
@@ -328,10 +423,7 @@
         return setToast("저장할 URL이 없어요. 줄바꿈으로 URL을 붙여넣어 주세요.", "err");
       }
 
-      // UI 잠금
-      $("saveBtn").disabled = true;
-      $("openFirstBtn").disabled = true;
-      $("clearBtn").disabled = true;
+      lockUI(true);
 
       $("log").textContent = "";
       if (invalid.length){
@@ -346,7 +438,6 @@
       let okCount = 0;
       let failCount = 0;
       const succeeded = new Set();
-
       const GAP_MS = 250;
 
       for (let i = 0; i < valid.length; i++){
@@ -360,7 +451,6 @@
           if (res.data && res.data.ok){
             okCount++;
             succeeded.add(url);
-
             const dbg = res.data.debug
               ? ` (upstream: ${res.data.debug.upstreamStatus}${res.data.debug.redirectedTo ? ", redirected" : ""})`
               : "";
@@ -368,10 +458,12 @@
           } else {
             failCount++;
             appendLog(`❌ 실패: ${url} — ${res.data?.error || "unknown"}`);
+            openLogIfClosed();
           }
         } catch (e){
           failCount++;
           appendLog(`❌ 실패: ${url} — ${String(e?.message || e)}`);
+          openLogIfClosed();
         }
 
         await sleep(GAP_MS);
@@ -388,13 +480,19 @@
       } else if (okCount === 0){
         setToast(`저장 실패… ${failCount}/${valid.length}개 실패`, "err");
       } else {
-        setToast(`저장 완료 (성공 ${okCount}, 실패 ${failCount})`, "");
+        setToast(`저장 완료 (성공 ${okCount}, 실패 ${failCount})`, "err");
       }
 
-      // UI 잠금 해제
-      $("saveBtn").disabled = false;
-      $("openFirstBtn").disabled = false;
-      $("clearBtn").disabled = false;
+      lockUI(false);
+    }
+
+    $("saveBig").addEventListener("click", runSave);
+
+    $("contentUrls").addEventListener("keydown", (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter"){
+        e.preventDefault();
+        runSave();
+      }
     });
   </script>
 </body>
