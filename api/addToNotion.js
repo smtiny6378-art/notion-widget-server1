@@ -235,9 +235,8 @@ module.exports = async (req, res) => {
 
     const genreValue = genreArr[0] || "";
 
-    const keywordValues = isAdult
-      ? Array.from(new Set([...tagsArr, "19"]))
-      : Array.from(new Set(tagsArr));
+// 키워드: tags만 사용 (19 자동 추가 ❌)
+const keywordValues = Array.from(new Set(tagsArr));
 
     const createdOptions = { platform: [], genre: [], keywords: [] };
 
