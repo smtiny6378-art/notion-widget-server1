@@ -20,13 +20,12 @@
 <body>
   <div class="card">
     <div class="hint">
-      ✅ 입력칸에 <b>작품 URL</b> 또는 <b>제목</b>을 넣고 버튼을 누르세요.<br/>
-      - URL이면: 상세를 불러옵니다<br/>
-      - 제목이면: 카카오웹툰 검색 페이지를 새 탭으로 엽니다 (서버 검색 차단 때문에 이 방식이 제일 안정적)
+      입력칸에 <b>작품 URL</b> 또는 <b>제목</b>을 넣고 실행하세요.<br/>
+      - URL → 상세 불러오기<br/>
+      - 제목 → 카카오웹툰 검색 새 탭
     </div>
 
     <input id="input" placeholder="작품 URL 또는 제목 (예: 병아리반)" />
-
     <button id="go">실행</button>
 
     <div class="hr"></div>
@@ -34,6 +33,10 @@
     <div id="status" class="loading" style="display:none;"></div>
     <div id="error" class="error" style="display:none;"></div>
     <div id="detail"></div>
+
+    <button id="saveBtn" style="display:none; background:#4c7cff; color:#fff;">
+      노션에 저장
+    </button>
 
     <div class="hint" style="margin-top:14px;">
       예시 URL 형식:<br/>
@@ -44,9 +47,12 @@
   <script>
     const inputEl = document.getElementById("input");
     const goBtn = document.getElementById("go");
+    const saveBtn = document.getElementById("saveBtn");
     const statusEl = document.getElementById("status");
     const errorEl = document.getElementById("error");
     const detailEl = document.getElementById("detail");
+
+    let currentData = null;
 
     function setLoading(msg) {
       statusEl.style.display = "block";
@@ -77,12 +83,15 @@
     async function loadDetailByUrl(url) {
       clearError();
       detailEl.innerHTML = "";
+      saveBtn.style.display = "none";
       setLoading("상세 불러오는 중...");
 
       try {
         const res = await fetch("/api/getKakaoDetail?url=" + encodeURIComponent(url));
         const d = await res.json();
         if (!d.ok) throw new Error(d.error || "getKakaoDetail failed");
+
+        currentData = d;
 
         detailEl.innerHTML = `
           <h3 style="margin:0 0 8px;">${d.title || ""}</h3>
@@ -91,6 +100,8 @@
           <p style="font-size:13px; line-height:1.5; margin-top:8px;">${d.desc || ""}</p>
           <div class="hint"><a href="${d.url}" target="_blank">카카오웹툰에서 열기</a></div>
         `;
+
+        saveBtn.style.display = "block";
       } catch (e) {
         showError("상세 실패: " + (e?.message || e));
       } finally {
@@ -103,15 +114,13 @@
       if (!v) return;
 
       if (isProbablyUrl(v)) {
-        // ✅ URL이면 상세 파싱
         await loadDetailByUrl(v);
       } else {
-        // ✅ 제목이면 카카오웹툰 검색 탭 열기
         clearError();
         detailEl.innerHTML = `
           <div class="hint">
             새 탭에서 검색 결과를 열었어요.<br/>
-            거기서 작품 페이지로 들어간 뒤, 주소(URL)를 복사해서 여기 붙여넣으면 상세가 뜹니다.
+            작품 페이지로 들어간 뒤 URL을 복사해서 붙여넣어 주세요.
           </div>
         `;
         openKakaoSearch(v);
@@ -121,6 +130,35 @@
     goBtn.addEventListener("click", run);
     inputEl.addEventListener("keydown", (e) => {
       if (e.key === "Enter") run();
+    });
+
+    saveBtn.addEventListener("click", async () => {
+      if (!currentData) return;
+
+      setLoading("노션에 저장 중...");
+      try {
+        const res = await fetch("/api/addToNotion", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            platform: "카카오웹툰",
+            title: currentData.title,
+            coverUrl: currentData.cover,
+            url: currentData.url,
+            desc: currentData.desc,
+            isAdult: currentData.isAdult,
+          }),
+        });
+
+        const r = await res.json();
+        if (!r.ok) throw new Error(r.error || "addToNotion failed");
+
+        alert("노션에 저장 완료!");
+      } catch (e) {
+        showError("노션 저장 실패: " + (e?.message || e));
+      } finally {
+        clearLoading();
+      }
     });
   </script>
 </body>
