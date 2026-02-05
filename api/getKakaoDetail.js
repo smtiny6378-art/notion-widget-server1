@@ -12,6 +12,17 @@ function absolutize(u) {
   return "https://webtoon.kakao.com" + u;
 }
 
+function uniq(arr) {
+  return Array.from(new Set((arr || []).map((x) => String(x || "").trim()).filter(Boolean)));
+}
+
+function normalizeGenreValue(v) {
+  if (!v) return [];
+  if (Array.isArray(v)) return uniq(v);
+  if (typeof v === "string") return uniq(v.split(/[,/|]/g).map(s => s.trim()));
+  return [];
+}
+
 function titleFromKakaoUrl(url) {
   try {
     const u = String(url || "").trim();
@@ -24,45 +35,18 @@ function titleFromKakaoUrl(url) {
   }
 }
 
-function uniq(arr) {
-  return Array.from(new Set((arr || []).map((x) => String(x || "").trim()).filter(Boolean)));
+function extractContentId(url) {
+  const u = String(url || "");
+  // /content/작품명/2760
+  const m = u.match(/\/content\/[^/]+\/(\d+)/);
+  if (m) return m[1];
+  // 혹시 /content/2760 형태
+  const m2 = u.match(/\/content\/(\d+)/);
+  if (m2) return m2[1];
+  return "";
 }
 
-function normalizeGenreValue(v) {
-  if (!v) return [];
-  if (Array.isArray(v)) return uniq(v);
-  if (typeof v === "string") return uniq(v.split(/[,/|]/g).map(s => s.trim()));
-  return [];
-}
-
-// DFS로 특정 키 문자열 수집
-function collectByKeys(obj, keyCandidates) {
-  const keys = new Set(keyCandidates);
-  const out = [];
-  const seen = new Set();
-  const stack = [obj];
-
-  while (stack.length) {
-    const cur = stack.pop();
-    if (!cur || typeof cur !== "object") continue;
-    if (seen.has(cur)) continue;
-    seen.add(cur);
-
-    if (Array.isArray(cur)) {
-      for (const v of cur) stack.push(v);
-      continue;
-    }
-
-    for (const k of Object.keys(cur)) {
-      const v = cur[k];
-      if (keys.has(k) && typeof v === "string" && v.trim()) out.push(v.trim());
-      stack.push(v);
-    }
-  }
-  return out;
-}
-
-// JSON-LD에서 author/genre 뽑기(creator/contributor까지 포함)
+// JSON-LD에서 author/genre 뽑기(가능하면)
 function parseJsonLd($) {
   let authorName = "";
   let genre = [];
@@ -84,15 +68,10 @@ function parseJsonLd($) {
         if (!x) return [];
         if (typeof x === "string") return [x.trim()];
         if (Array.isArray(x)) return x.flatMap(takeName);
-        if (typeof x === "object") {
-          if (x.name) return [String(x.name).trim()];
-          // creator/author가 Person 형태일 때
-          if (x["@type"] === "Person" && x.name) return [String(x.name).trim()];
-        }
+        if (typeof x === "object") return x.name ? [String(x.name).trim()] : [];
         return [];
       };
 
-      // author → 없으면 creator/contributor도 시도
       if (!authorName) {
         const names = uniq([
           ...takeName(node.author),
@@ -105,7 +84,6 @@ function parseJsonLd($) {
       if (genre.length === 0) {
         genre = normalizeGenreValue(node.genre);
       }
-
       if (genre.length === 0 && node.keywords) {
         genre = normalizeGenreValue(node.keywords);
       }
@@ -119,25 +97,57 @@ function parseJsonLd($) {
   return { authorName, genre };
 }
 
-// ✅ HTML 원문에서 author 키 문자열을 정규식으로 직접 추출
-function parseAuthorByRegex(html) {
-  const patterns = [
-    /"authorName"\s*:\s*"([^"]+)"/,
-    /"writerName"\s*:\s*"([^"]+)"/,
-    /"drawerName"\s*:\s*"([^"]+)"/,
-    /"artistName"\s*:\s*"([^"]+)"/,
-    /"penName"\s*:\s*"([^"]+)"/,
-    /"creatorName"\s*:\s*"([^"]+)"/,
+// 내부 API 응답(JSON)에서 작가/장르를 최대한 넓게 추출
+function extractAuthorGenreFromApiJson(j) {
+  let authorName = "";
+  let genre = [];
+
+  const pickNames = (x) => {
+    if (!x) return [];
+    if (typeof x === "string") return [x.trim()];
+    if (Array.isArray(x)) return x.flatMap(pickNames);
+    if (typeof x === "object") {
+      if (x.name) return [String(x.name).trim()];
+      if (x.penName) return [String(x.penName).trim()];
+    }
+    return [];
+  };
+
+  // 후보 키들(구조가 바뀔 수 있어서 넓게)
+  const authorRoots = [
+    j.author, j.authors, j.creator, j.creators, j.contributor, j.contributors,
+    j.writer, j.writers, j.artist, j.artists,
+    j.content?.author, j.content?.authors, j.content?.creators,
+    j.result?.author, j.result?.authors, j.data?.author, j.data?.authors,
   ];
 
-  const found = [];
-  for (const re of patterns) {
-    const m = html.match(re);
-    if (m && m[1]) found.push(m[1]);
-  }
+  const names = uniq(authorRoots.flatMap(pickNames)).filter(s => s.length <= 50);
+  if (names.length) authorName = names.join(", ");
 
-  // 중복 제거 + 너무 긴 문자열 제거
-  return uniq(found).filter((s) => s.length <= 40).join(", ");
+  const genreRoots = [
+    j.genre, j.genres, j.category, j.categories, j.tags,
+    j.content?.genre, j.content?.genres, j.content?.categories,
+    j.result?.genre, j.result?.genres, j.data?.genre, j.data?.genres,
+  ];
+
+  const genreNames = uniq(genreRoots.flatMap(pickNames)).filter(s => s.length <= 30);
+  if (genreNames.length) genre = genreNames.slice(0, 5);
+
+  return { authorName, genre };
+}
+
+async function tryFetchJson(url, headers) {
+  try {
+    const r = await fetch(url, { headers, redirect: "follow" });
+    if (!r.ok) return null;
+    const ct = (r.headers.get("content-type") || "").toLowerCase();
+    // json이 아니어도 body가 json일 때가 있어서 그냥 텍스트로 파싱
+    const text = await r.text();
+    const j = safeJsonParse(text);
+    return j || null;
+  } catch {
+    return null;
+  }
 }
 
 module.exports = async function handler(req, res) {
@@ -145,16 +155,14 @@ module.exports = async function handler(req, res) {
     const url = (req.query.url || "").trim();
     if (!url) return res.status(400).json({ ok: false, error: "url required" });
 
-    const r = await fetch(url, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
-        "Referer": "https://webtoon.kakao.com/",
-      },
-      redirect: "follow",
-    });
+    const headers = {
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+      "Referer": "https://webtoon.kakao.com/",
+    };
 
+    const r = await fetch(url, { headers, redirect: "follow" });
     const html = await r.text();
     const $ = cheerio.load(html);
 
@@ -169,58 +177,38 @@ module.exports = async function handler(req, res) {
     const cover = absolutize(ogImage);
     const isAdult = html.includes("19세") || html.includes("성인");
 
-    // ✅ 1) JSON-LD 우선
+    // 1) JSON-LD 시도
     let { authorName, genre } = parseJsonLd($);
 
-    // ✅ 1.5) meta name="author"도 확인
-    if (!authorName) {
-      const metaAuthor =
-        $("meta[name='author']").attr("content")?.trim() ||
-        $("meta[property='book:author']").attr("content")?.trim() ||
-        "";
-      if (metaAuthor) authorName = metaAuthor;
-    }
+    // 2) 내부 API fallback 시도 (작가/장르가 비거나 부족할 때)
+    const contentId = extractContentId(url);
+    let usedApi = "";
+    if (contentId && (!authorName || genre.length === 0)) {
+      const candidates = [
+        // ✅ 가장 흔한 패턴들 (가능한 걸 “자동으로” 시도)
+        `https://webtoon.kakao.com/api/v1/content/${contentId}`,
+        `https://webtoon.kakao.com/api/v1/contents/${contentId}`,
+        `https://webtoon.kakao.com/api/v2/content/${contentId}`,
+        `https://webtoon.kakao.com/api/v2/contents/${contentId}`,
+        `https://webtoon.kakao.com/api/v1/content/${contentId}/detail`,
+        `https://webtoon.kakao.com/api/v1/contents/${contentId}/detail`,
+        `https://webtoon.kakao.com/api/v1/content/${contentId}/home`,
+        `https://webtoon.kakao.com/api/v1/contents/${contentId}/home`,
+      ];
 
-    // ✅ 2) Next.js 데이터 fallback
-    if (!authorName || genre.length === 0) {
-      const nextData = safeJsonParse($("#__NEXT_DATA__").text() || "");
-      if (nextData) {
-        if (!authorName) {
-          const preferredAuthors = uniq(collectByKeys(nextData, [
-            "authorName", "writerName", "drawerName", "artistName", "creatorName", "penName"
-          ]));
-          if (preferredAuthors.length) authorName = preferredAuthors.join(", ");
-        }
-        if (genre.length === 0) {
-          const genreCandidates = uniq(collectByKeys(nextData, [
-            "genreName", "categoryName", "categoryTitle", "tagName", "genre"
-          ]));
-          genre = genreCandidates.filter(s => s.length <= 20).slice(0, 5);
-        }
-      }
-    }
+      for (const apiUrl of candidates) {
+        const j = await tryFetchJson(apiUrl, {
+          ...headers,
+          Accept: "application/json,text/plain,*/*",
+        });
+        if (!j) continue;
 
-    // ✅ 2.5) HTML regex fallback (작가명만이라도 반드시 건지기)
-    if (!authorName) {
-      const regexAuthor = parseAuthorByRegex(html);
-      if (regexAuthor) authorName = regexAuthor;
-    }
+        const picked = extractAuthorGenreFromApiJson(j);
+        if (!authorName && picked.authorName) authorName = picked.authorName;
+        if (genre.length === 0 && picked.genre.length) genre = picked.genre;
 
-    // ✅ 3) 텍스트 fallback(최후)
-    if (!authorName || genre.length === 0) {
-      const bodyText = $("body").text().replace(/\s+/g, " ");
-
-      if (!authorName) {
-        const m =
-          bodyText.match(/작가\s*[:：]?\s*([가-힣A-Za-z0-9·._\-, ]{2,40})/) ||
-          bodyText.match(/글\s*[:：]?\s*([가-힣A-Za-z0-9·._\-, ]{2,40})/) ||
-          bodyText.match(/그림\s*[:：]?\s*([가-힣A-Za-z0-9·._\-, ]{2,40})/);
-        if (m && m[1]) authorName = m[1].trim();
-      }
-
-      if (genre.length === 0) {
-        const gm = bodyText.match(/장르\s*[:：]?\s*([가-힣A-Za-z0-9·/_\-, ]{2,30})/);
-        if (gm && gm[1]) genre = [gm[1].trim()];
+        usedApi = apiUrl;
+        if (authorName && genre.length) break;
       }
     }
 
@@ -235,6 +223,8 @@ module.exports = async function handler(req, res) {
       cover,
       isAdult,
       url,
+      // 디버그(문제 계속이면 어떤 API가 됐는지 확인용)
+      ...(req.query.debug ? { contentId, usedApi } : {}),
     });
   } catch (e) {
     return res.status(500).json({ ok: false, error: String(e?.message || e) });
