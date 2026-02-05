@@ -5,50 +5,48 @@
   <title>Kakao Webtoon Widget</title>
   <style>
     body { margin:0; font-family: system-ui, sans-serif; background:#111; color:#fff; }
-    .card { padding:16px; border-radius:12px; background:#1c1c1c; width:360px; }
-    input { width:100%; padding:10px; border-radius:8px; border:none; outline:none; margin-top:8px; }
+    .card { padding:16px; border-radius:12px; background:#1c1c1c; width:380px; }
+    input { width:100%; padding:10px; border-radius:8px; border:none; outline:none; margin-top:10px; }
     button { width:100%; padding:10px 12px; border-radius:8px; border:none; cursor:pointer; margin-top:8px; }
-    .hint { font-size:12px; color:#aaa; margin-top:8px; line-height:1.35; }
+    .hint { font-size:12px; color:#aaa; margin-top:8px; line-height:1.45; }
     img { width:100%; border-radius:8px; margin-top:10px; }
     .adult { background:#444; color:#bbb; padding:6px; border-radius:6px; text-align:center; margin-top:10px; }
     .error { margin-top:10px; background:#2a1515; color:#ffb4b4; padding:10px; border-radius:8px; font-size:12px; white-space:pre-wrap; }
     .loading { margin-top:10px; color:#bbb; font-size:12px; }
     a { color:#9ecbff; }
+    .hr { height:1px; background:#2d2d2d; margin:12px 0; }
   </style>
 </head>
 <body>
   <div class="card">
     <div class="hint">
-      ✅ 카카오웹툰은 서버 검색이 자주 막혀서,<br/>
-      <b>1) 아래 버튼으로 카카오웹툰에서 직접 검색</b> →<br/>
-      <b>2) 작품 페이지 URL을 복사</b> →<br/>
-      <b>3) 여기 붙여넣기</b> 하면 상세가 뜹니다.
+      ✅ 입력칸에 <b>작품 URL</b> 또는 <b>제목</b>을 넣고 버튼을 누르세요.<br/>
+      - URL이면: 상세를 불러옵니다<br/>
+      - 제목이면: 카카오웹툰 검색 페이지를 새 탭으로 엽니다 (서버 검색 차단 때문에 이 방식이 제일 안정적)
     </div>
 
-    <input id="keyword" placeholder="예: 병아리반 (검색어)" />
-    <button id="openSearch">카카오웹툰에서 검색 열기</button>
+    <input id="input" placeholder="작품 URL 또는 제목 (예: 병아리반)" />
 
-    <div class="hint">
-      작품 페이지 주소 예시:<br/>
-      https://webtoon.kakao.com/content/작품명/12345
-    </div>
+    <button id="go">실행</button>
 
-    <input id="urlInput" placeholder="작품 URL 붙여넣기" />
-    <button id="loadBtn">이 URL로 상세 불러오기</button>
+    <div class="hr"></div>
 
     <div id="status" class="loading" style="display:none;"></div>
     <div id="error" class="error" style="display:none;"></div>
     <div id="detail"></div>
+
+    <div class="hint" style="margin-top:14px;">
+      예시 URL 형식:<br/>
+      https://webtoon.kakao.com/content/작품명/12345
+    </div>
   </div>
 
   <script>
-    const keyword = document.getElementById("keyword");
-    const openSearch = document.getElementById("openSearch");
-    const urlInput = document.getElementById("urlInput");
-    const loadBtn = document.getElementById("loadBtn");
+    const inputEl = document.getElementById("input");
+    const goBtn = document.getElementById("go");
     const statusEl = document.getElementById("status");
     const errorEl = document.getElementById("error");
-    const detail = document.getElementById("detail");
+    const detailEl = document.getElementById("detail");
 
     function setLoading(msg) {
       statusEl.style.display = "block";
@@ -67,18 +65,18 @@
       errorEl.textContent = "";
     }
 
-    openSearch.addEventListener("click", () => {
-      const q = (keyword.value || "").trim();
-      const url = "https://webtoon.kakao.com/search?keyword=" + encodeURIComponent(q || "");
+    function isProbablyUrl(s) {
+      return /^https?:\/\/\S+/i.test(s);
+    }
+
+    function openKakaoSearch(keyword) {
+      const url = "https://webtoon.kakao.com/search?keyword=" + encodeURIComponent(keyword);
       window.open(url, "_blank");
-    });
+    }
 
-    async function loadDetail() {
-      const url = (urlInput.value || "").trim();
-      if (!url) return;
-
+    async function loadDetailByUrl(url) {
       clearError();
-      detail.innerHTML = "";
+      detailEl.innerHTML = "";
       setLoading("상세 불러오는 중...");
 
       try {
@@ -86,11 +84,11 @@
         const d = await res.json();
         if (!d.ok) throw new Error(d.error || "getKakaoDetail failed");
 
-        detail.innerHTML = `
-          <h3 style="margin:12px 0 6px;">${d.title || ""}</h3>
+        detailEl.innerHTML = `
+          <h3 style="margin:0 0 8px;">${d.title || ""}</h3>
           ${d.isAdult ? `<div class="adult">19세 이용가</div>` : (d.cover ? `<img src="${d.cover}" />` : "")}
           <div class="hint">${d.platform || "카카오웹툰"}</div>
-          <p style="font-size:13px; line-height:1.45;">${d.desc || ""}</p>
+          <p style="font-size:13px; line-height:1.5; margin-top:8px;">${d.desc || ""}</p>
           <div class="hint"><a href="${d.url}" target="_blank">카카오웹툰에서 열기</a></div>
         `;
       } catch (e) {
@@ -100,9 +98,29 @@
       }
     }
 
-    loadBtn.addEventListener("click", loadDetail);
-    urlInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") loadDetail();
+    async function run() {
+      const v = (inputEl.value || "").trim();
+      if (!v) return;
+
+      if (isProbablyUrl(v)) {
+        // ✅ URL이면 상세 파싱
+        await loadDetailByUrl(v);
+      } else {
+        // ✅ 제목이면 카카오웹툰 검색 탭 열기
+        clearError();
+        detailEl.innerHTML = `
+          <div class="hint">
+            새 탭에서 검색 결과를 열었어요.<br/>
+            거기서 작품 페이지로 들어간 뒤, 주소(URL)를 복사해서 여기 붙여넣으면 상세가 뜹니다.
+          </div>
+        `;
+        openKakaoSearch(v);
+      }
+    }
+
+    goBtn.addEventListener("click", run);
+    inputEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") run();
     });
   </script>
 </body>
