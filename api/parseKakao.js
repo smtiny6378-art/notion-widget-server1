@@ -10,7 +10,8 @@ module.exports = async function handler(req, res) {
     }
 
     if (url.includes("page.kakao.com")) {
-      const page = require("./getKakaoPageDetail"); // ← 이제 파일 생기면 에러 사라짐
+      // ✅ 새 파일 추가 없이, 기존 함수 파일로 연결
+      const page = require("./searchKakao"); // <- 여기 중요!
       return page(req, res);
     }
 
