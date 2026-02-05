@@ -24,7 +24,18 @@ function titleFromKakaoUrl(url) {
   }
 }
 
-// DFS로 문자열 수집(특정 키 후보만)
+function uniq(arr) {
+  return Array.from(new Set((arr || []).map((x) => String(x || "").trim()).filter(Boolean)));
+}
+
+function normalizeGenreValue(v) {
+  if (!v) return [];
+  if (Array.isArray(v)) return uniq(v);
+  if (typeof v === "string") return uniq(v.split(/[,/|]/g).map(s => s.trim()));
+  return [];
+}
+
+// DFS로 특정 키 문자열 수집
 function collectByKeys(obj, keyCandidates) {
   const keys = new Set(keyCandidates);
   const out = [];
@@ -48,44 +59,58 @@ function collectByKeys(obj, keyCandidates) {
       stack.push(v);
     }
   }
-
   return out;
 }
 
-// DFS로 "이미지 URL처럼 보이는" 문자열 수집
-function collectImageUrls(obj) {
-  const out = [];
-  const seen = new Set();
-  const stack = [obj];
+// JSON-LD에서 author/genre 뽑기
+function parseJsonLd($) {
+  let authorName = "";
+  let genre = [];
 
-  while (stack.length) {
-    const cur = stack.pop();
-    if (!cur || typeof cur !== "object") continue;
-    if (seen.has(cur)) continue;
-    seen.add(cur);
+  const scripts = $("script[type='application/ld+json']").toArray();
+  for (const s of scripts) {
+    const raw = $(s).text();
+    if (!raw) continue;
 
-    if (Array.isArray(cur)) {
-      for (const v of cur) stack.push(v);
-      continue;
+    const data = safeJsonParse(raw);
+    if (!data) continue;
+
+    const nodes = Array.isArray(data) ? data : [data];
+
+    for (const node of nodes) {
+      if (!node || typeof node !== "object") continue;
+
+      // author: string | {name} | [{name}]
+      const a = node.author;
+      if (!authorName && a) {
+        if (typeof a === "string") authorName = a.trim();
+        else if (Array.isArray(a)) {
+          const names = a.map(x => (typeof x === "string" ? x : x?.name)).filter(Boolean);
+          authorName = uniq(names).join(", ");
+        } else if (typeof a === "object" && a.name) {
+          authorName = String(a.name).trim();
+        }
+      }
+
+      // genre: string | array
+      const g = node.genre;
+      if (genre.length === 0 && g) {
+        genre = normalizeGenreValue(g);
+      }
+
+      // 일부는 keywords로 주기도 함
+      const kw = node.keywords;
+      if (genre.length === 0 && kw) {
+        genre = normalizeGenreValue(kw);
+      }
+
+      if (authorName || genre.length) break;
     }
 
-    for (const k of Object.keys(cur)) {
-      const v = cur[k];
-      if (typeof v === "string" && /^https?:\/\/.+\.(jpg|jpeg|png|webp)(\?.*)?$/i.test(v)) {
-        out.push(v);
-      }
-      // 흔한 키도 추가로 줍기
-      if (typeof v === "string" && /(image|thumb|thumbnail|poster|cover)/i.test(k) && v.startsWith("http")) {
-        out.push(v);
-      }
-      stack.push(v);
-    }
+    if (authorName || genre.length) break;
   }
-  return out;
-}
 
-function uniq(arr) {
-  return Array.from(new Set(arr.filter(Boolean)));
+  return { authorName, genre };
 }
 
 module.exports = async function handler(req, res) {
@@ -106,7 +131,6 @@ module.exports = async function handler(req, res) {
     const html = await r.text();
     const $ = cheerio.load(html);
 
-    // title/desc/cover(메타 우선)
     const ogTitle = $("meta[property='og:title']").attr("content")?.trim() || "";
     const ogDesc = $("meta[property='og:description']").attr("content")?.trim() || "";
     const ogImage = $("meta[property='og:image']").attr("content")?.trim() || "";
@@ -115,53 +139,36 @@ module.exports = async function handler(req, res) {
     if (!title) title = titleFromKakaoUrl(url);
 
     const desc = ogDesc || "";
-
-    let cover = absolutize(ogImage);
-
+    const cover = absolutize(ogImage);
     const isAdult = html.includes("19세") || html.includes("성인");
 
-    // Next.js 데이터 파싱
-    let authorName = "";
-    let genre = [];
+    // ✅ 1) JSON-LD 우선
+    let { authorName, genre } = parseJsonLd($);
 
-    const nextData = safeJsonParse($("#__NEXT_DATA__").text() || "");
-    if (nextData) {
-      // 작가 후보 키들
-      const authorCandidates = collectByKeys(nextData, [
-        "authorName", "authorsName", "writerName", "drawerName", "artistName",
-        "creatorName", "penName", "name"
-      ]);
-      // 너무 많이 잡힐 수 있어서 "name"은 후순위로 쓰되, 다른 키가 있으면 그걸 우선
-      const preferredAuthors = collectByKeys(nextData, [
-        "authorName", "authorsName", "writerName", "drawerName", "artistName",
-        "creatorName", "penName"
-      ]);
-
-      const authorPick = uniq(preferredAuthors).length ? uniq(preferredAuthors) : [];
-      authorName = authorPick.join(", ");
-
-      // 장르 후보 키들
-      const genreCandidates = collectByKeys(nextData, [
-        "genreName", "genre", "genres", "categoryName", "category", "categoryTitle", "tagName"
-      ]);
-      // 너무 잡히면 필터링(너무 긴 문장 제외)
-      genre = uniq(genreCandidates).filter((s) => s.length <= 20).slice(0, 5);
-
-      // 표지 후보
-      if (!cover) {
-        const imgs = uniq(collectImageUrls(nextData));
-        // webtoon 관련 도메인 우선
-        const preferred = imgs.find((u) => /kakao|daum|kakaocdn|webtoon/i.test(u)) || imgs[0] || "";
-        cover = preferred;
+    // ✅ 2) Next.js 데이터 fallback
+    if (!authorName || genre.length === 0) {
+      const nextData = safeJsonParse($("#__NEXT_DATA__").text() || "");
+      if (nextData) {
+        if (!authorName) {
+          const preferredAuthors = uniq(collectByKeys(nextData, [
+            "authorName","authorsName","writerName","drawerName","artistName","creatorName","penName"
+          ]));
+          authorName = preferredAuthors.join(", ");
+        }
+        if (genre.length === 0) {
+          const genreCandidates = uniq(collectByKeys(nextData, [
+            "genreName","categoryName","categoryTitle","tagName","genre"
+          ]));
+          genre = genreCandidates.filter(s => s.length <= 20).slice(0, 5);
+        }
       }
     }
 
-    // DOM/텍스트 fallback(NextData 실패 대비)
+    // ✅ 3) 텍스트 fallback(최후)
     if (!authorName || genre.length === 0) {
       const bodyText = $("body").text().replace(/\s+/g, " ");
 
       if (!authorName) {
-        // 예: "작가 홍길동" / "글 홍길동" / "그림 홍길동"
         const m =
           bodyText.match(/작가\s*[:：]?\s*([가-힣A-Za-z0-9·._\-, ]{2,30})/) ||
           bodyText.match(/글\s*[:：]?\s*([가-힣A-Za-z0-9·._\-, ]{2,30})/) ||
