@@ -134,7 +134,7 @@ module.exports = async function handler(req, res) {
     res.setHeader("Cache-Control", "no-store");
     return res.json({
       ok: true,
-      platform: "카카오웹툰",
+      platform: "KAKAO",
       title,
       authorName,
       genre,
@@ -148,3 +148,18 @@ module.exports = async function handler(req, res) {
     return res.status(500).json({ ok: false, error: String(e?.message || e) });
   }
 };
+
+function normalizeKakaoTitle(rawTitle, isAdult) {
+  let t = String(rawTitle || "").trim();
+
+  // 뒤에 붙는 "| 카카오웹툰" 제거
+  t = t.replace(/\s*\|\s*카카오웹툰\s*$/i, "").trim();
+
+  // 19세면 접미사 붙이기
+  if (isAdult && t && !t.includes("[19세 완전판]")) {
+    t = t + " [19세 완전판]";
+  }
+
+  return t;
+}
+
