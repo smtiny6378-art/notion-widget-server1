@@ -10,10 +10,8 @@ function absolutize(u) {
 
 module.exports = async function handler(req, res) {
   try {
-    const contentId = (req.query.contentId || "").trim();
-    if (!contentId) return res.status(400).json({ ok: false, error: "contentId required" });
-
-    const url = `https://webtoon.kakao.com/content/${contentId}`;
+    const url = (req.query.url || "").trim();
+    if (!url) return res.status(400).json({ ok: false, error: "url required" });
 
     const r = await fetch(url, {
       headers: {
@@ -26,19 +24,18 @@ module.exports = async function handler(req, res) {
     const html = await r.text();
     const $ = cheerio.load(html);
 
-    // 최대한 안전하게 추출 (사이트 구조가 바뀔 수 있어서 여러 후보를 둠)
     const title =
       $("meta[property='og:title']").attr("content")?.trim() ||
-      $("h3").first().text().trim() ||
+      $("h1,h2,h3").first().text().trim() ||
       "";
 
     const desc =
       $("meta[property='og:description']").attr("content")?.trim() ||
-      $("p").text().trim().slice(0, 300) ||
       "";
 
-    const cover =
-      absolutize($("meta[property='og:image']").attr("content")?.trim() || $("img").first().attr("src"));
+    const cover = absolutize(
+      $("meta[property='og:image']").attr("content")?.trim() || ""
+    );
 
     const isAdult = html.includes("19세") || html.includes("성인");
 
@@ -46,9 +43,8 @@ module.exports = async function handler(req, res) {
     return res.json({
       ok: true,
       platform: "카카오웹툰",
-      contentId,
       title,
-      author: "", // 카카오웹툰은 author DOM이 자주 바뀌어서 일단 빈값 (원하면 다음에 안정적으로 뽑아줄게)
+      author: "",
       desc,
       cover,
       isAdult,
