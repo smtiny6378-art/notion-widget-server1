@@ -109,14 +109,13 @@ module.exports = async function handler(req, res) {
     const ogDesc = $("meta[property='og:description']").attr("content")?.trim() || "";
     const ogImage = $("meta[property='og:image']").attr("content")?.trim() || "";
 
-    // ✅ 먼저 "rawTitle"만 잡아두고
     let rawTitle = ogTitle || $("h1,h2,h3").first().text().trim() || "";
     if (!rawTitle) rawTitle = titleFromKakaoUrl(url);
 
     const desc = ogDesc || "";
-    const cover = absolutize(ogImage);
+    const coverUrl = absolutize(ogImage);
 
-    // ✅ isAdult는 반드시 여기서 먼저 선언/초기화 (TDZ 방지)
+    // ✅ isAdult는 반드시 먼저 선언
     let isAdult = html.includes("19세") || html.includes("성인");
 
     // 2) content/text/{id}에서 author/genre/isAdult/title 확정 추출
@@ -146,10 +145,7 @@ module.exports = async function handler(req, res) {
           if (picked.authorName) authorName = picked.authorName;
           if (picked.genre?.length) genre = picked.genre;
 
-          // ✅ 여기서 isAdult가 더 정확할 수 있음
           if (typeof picked.isAdult === "boolean") isAdult = picked.isAdult || isAdult;
-
-          // ✅ title도 여기서 더 정확할 수 있음 (rawTitle 갱신)
           if (picked.title) rawTitle = picked.title;
 
           usedTextEndpoint = textUrl;
@@ -157,7 +153,6 @@ module.exports = async function handler(req, res) {
       }
     }
 
-    // ✅ 최종 title은 항상 마지막에 normalize
     const title = normalizeKakaoTitle(rawTitle, isAdult);
 
     res.setHeader("Cache-Control", "no-store");
@@ -168,7 +163,7 @@ module.exports = async function handler(req, res) {
       authorName,
       genre,
       desc,
-      cover,
+      coverUrl, // ✅ addToNotion과 맞춤
       isAdult,
       url,
       ...(req.query.debug ? { contentId, usedTextEndpoint } : {}),
