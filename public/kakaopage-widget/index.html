@@ -1,1 +1,368 @@
-<!doctype html> <html lang="ko"> <head> <meta charset="utf-8" /> <meta name="viewport" content="width=device-width, initial-scale=1" /> <title>KakaoPage → Notion</title> <style> :root{ --bg:#0b0b0c; --line: rgba(255,255,255,.10); --line2: rgba(255,255,255,.14); --text:#f2f2f3; --muted:#a9a9b2; --accent:#ffe400; --ok:#9be59b; --err:#ff9a9a; } *{ box-sizing:border-box; } body{ margin:0; background:transparent; color:var(--text); font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; } .wrap{ width:100%; max-width: 720px; margin: 0 auto; padding: 14px; background: var(--bg); border: 1px solid var(--line); border-radius: 20px; } .top{ display:flex; gap:12px; align-items:center; padding: 12px; background: rgba(255,255,255,.03); border: 1px solid var(--line); border-radius: 16px; } .logo{ width:42px;height:42px; border-radius: 14px; background: var(--accent); color:#111; display:grid; place-items:center; font-weight:900; letter-spacing:.4px; flex:0 0 auto; } .title{ font-weight:900; font-size:15px; line-height:1.2; } .sub{ margin-top:4px; color:var(--muted); font-size:12px; line-height:1.35; } .section{ margin-top: 12px; padding: 12px; border: 1px solid var(--line); border-radius: 16px; background: rgba(255,255,255,.02); } .sec-title{ font-weight:900; font-size:13px; margin-bottom: 10px; color: rgba(255,255,255,.92); display:flex; justify-content:space-between; gap:10px; align-items:center; } .sec-title span{ color:var(--muted); font-weight:700; font-size:12px; } .row{ display:flex; gap:10px; flex-wrap:wrap; } .field{ flex:1 1 220px; display:flex; flex-direction:column; gap:8px; } label{ font-size:12px; color:var(--muted); } input{ all:unset; padding: 11px 12px; border-radius: 14px; border: 1px solid var(--line); background: rgba(255,255,255,.04); font-size: 14px; color: var(--text); } input::placeholder{ color: rgba(255,255,255,.35); } .btns{ display:flex; gap:10px; flex-wrap:wrap; margin-top: 10px; } button{ all:unset; cursor:pointer; padding: 11px 12px; border-radius: 14px; border: 1px solid var(--line2); background: rgba(255,255,255,.08); font-size: 13px; font-weight: 800; user-select:none; } button:hover{ background: rgba(255,255,255,.12); } .primary{ background: rgba(255, 228, 0, .18); border-color: rgba(255, 228, 0, .35); } .primary:hover{ background: rgba(255, 228, 0, .24); } .hint{ margin-top: 10px; color: var(--muted); font-size: 12px; line-height: 1.45; } .hint code{ background: rgba(255,255,255,.06); border: 1px solid var(--line); padding: 2px 6px; border-radius: 8px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 11px; } .toast{ margin-top: 12px; padding: 10px 12px; border-radius: 14px; border: 1px solid var(--line); background: rgba(255,255,255,.03); color:var(--muted); font-size: 12px; min-height: 40px; display:flex; align-items:center; } .ok{ color: var(--ok); } .err{ color: var(--err); } </style> </head> <body> <div class="wrap"> <div class="top"> <div class="logo">KP</div> <div> <div class="title">카카오페이지 검색 → URL로 노션 저장</div> <div class="sub"> 검색은 새 탭(카카오페이지)에서 하고,<br/> 작품 상세 URL을 붙여넣어 노션 DB에 저장해요. </div> </div> </div> <div class="section"> <div class="sec-title"> <div>1) 카카오페이지 검색 열기</div> <span>웹툰/웹소설 모두 OK</span> </div> <div class="row"> <div class="field"> <label for="keyword">검색어</label> <input id="keyword" placeholder="예: 무정의" /> </div> </div> <div class="btns"> <button class="primary" id="openSearch">검색 결과 열기 (새 탭)</button> <button id="openHome">카카오페이지 홈</button> </div> <div class="hint"> ✅ 검색 결과 URL: <code>https://page.kakao.com/search/result?keyword=검색어</code><br/> 작품 URL 예시: <code>https://page.kakao.com/content/65171279</code> </div> </div> <div class="section"> <div class="sec-title"> <div>2) 작품 URL 붙여넣고 저장</div> <span>제목/표지 자동 채우기 시도</span> </div> <div class="row"> <div class="field" style="flex-basis: 520px;"> <label for="contentUrl">카카오페이지 작품 URL</label> <input id="contentUrl" placeholder="예: https://page.kakao.com/content/65171279" /> </div> </div> <div class="btns"> <button class="primary" id="saveBtn">노션에 저장</button> <button id="openContent">작품 페이지 열기</button> <button id="clearBtn">입력 지우기</button> </div> <div class="hint"> 저장 시 서버가 작품 페이지 메타(제목/표지/소개)를 가져오려 시도하고,<br/> 만약 카카오가 서버 접근을 막으면(302) URL 기반으로만 저장돼요. </div> </div> <div class="toast" id="toast">검색어를 입력하고 “검색 결과 열기”를 눌러 보세요.</div> </div> <script> const $ = (id) => document.getElementById(id); function setToast(text, cls=""){ const el = $("toast"); el.className = "toast " + cls; el.textContent = text || ""; } function openInNewTab(url){ window.open(url, "_blank", "noopener,noreferrer"); } $("openSearch").addEventListener("click", () => { const keyword = $("keyword").value.trim(); if(!keyword) return setToast("검색어를 입력해 주세요.", "err"); // ✅ 검증된 검색 결과 페이지 const url = "https://page.kakao.com/search/result?keyword=" + encodeURIComponent(keyword); openInNewTab(url); setToast("새 탭으로 검색 결과를 열었어요. 작품 상세 URL을 복사해 아래에 붙여넣어 주세요."); }); $("openHome").addEventListener("click", () => { openInNewTab("https://page.kakao.com/"); setToast("새 탭으로 홈을 열었어요."); }); $("openContent").addEventListener("click", () => { const url = $("contentUrl").value.trim(); if(!url) return setToast("먼저 작품 URL을 붙여넣어 주세요.", "err"); try { new URL(url); } catch { return setToast("URL 형식이 올바르지 않아요.", "err"); } openInNewTab(url); setToast("새 탭으로 작품 페이지를 열었어요."); }); $("clearBtn").addEventListener("click", () => { $("contentUrl").value = ""; setToast("입력을 지웠어요."); }); async function postJson(path, payload){ const r = await fetch(path, { method: "POST", headers: { "content-type":"application/json" }, body: JSON.stringify(payload) }); const text = await r.text(); let data; try { data = JSON.parse(text); } catch { data = { ok:false, error:"Non-JSON response", detail:text.slice(0,200) }; } return { status: r.status, data }; } $("saveBtn").addEventListener("click", async () => { const url = $("contentUrl").value.trim(); if(!url) return setToast("작품 URL을 붙여넣어 주세요.", "err"); try { new URL(url); } catch { return setToast("URL 형식이 올바르지 않아요.", "err"); } setToast("노션에 저장 중…"); const res = await postJson("/api/notion-create", { platform: "카카오페이지", url }); if (res.data && res.data.ok){ // debug도 보여줌 const dbg = res.data.debug ? (upstream: ${res.data.debug.upstreamStatus}${res.data.debug.redirectedTo ? ", redirected" : ""}) : ""; setToast(저장 완료!${dbg}, "ok"); } else { setToast(저장 실패: ${res.data?.error || "unknown"}, "err"); } }); </script> </body> </html>
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>KakaoPage → Notion</title>
+  <style>
+    :root{
+      --text:#111;
+      --muted:#666;
+      --line: rgba(0,0,0,.12);
+      --line2: rgba(0,0,0,.18);
+      --ok:#0a7a2f;
+      --err:#b00020;
+      --bg: transparent;
+      --card: rgba(255,255,255,.92);
+    }
+    *{ box-sizing:border-box; }
+    body{
+      margin:0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+    }
+    .wrap{
+      width:100%;
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 12px;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+    }
+    .title{
+      font-weight: 900;
+      font-size: 14px;
+      line-height: 1.2;
+      margin-bottom: 6px;
+    }
+    .sub{
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+      margin-bottom: 10px;
+    }
+    label{
+      display:block;
+      font-size:12px;
+      color: var(--muted);
+      margin: 8px 0 6px;
+    }
+    textarea{
+      width:100%;
+      min-height: 120px;
+      resize: vertical;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.95);
+      font-size: 13px;
+      color: var(--text);
+      outline: none;
+    }
+    textarea::placeholder{ color: rgba(0,0,0,.35); }
+    .btns{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      margin-top: 10px;
+      align-items:center;
+    }
+    button{
+      all:unset;
+      cursor:pointer;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid var(--line2);
+      background: rgba(0,0,0,.04);
+      font-size: 13px;
+      font-weight: 800;
+      user-select:none;
+    }
+    button:hover{ background: rgba(0,0,0,.06); }
+    button:disabled{
+      opacity:.55;
+      cursor:not-allowed;
+    }
+    .primary{
+      background: rgba(255, 228, 0, .55);
+      border-color: rgba(255, 228, 0, .9);
+    }
+    .primary:hover{ background: rgba(255, 228, 0, .7); }
+    .hint{
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .hint code{
+      background: rgba(0,0,0,.04);
+      border: 1px solid var(--line);
+      padding: 2px 6px;
+      border-radius: 8px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size: 11px;
+    }
+    .toast{
+      margin-top: 10px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: rgba(0,0,0,.03);
+      color: var(--muted);
+      font-size: 12px;
+      min-height: 40px;
+      display:flex;
+      align-items:center;
+      white-space: pre-wrap;
+    }
+    .ok{ color: var(--ok); }
+    .err{ color: var(--err); }
+    .log{
+      margin-top: 10px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 10px 12px;
+      background: rgba(0,0,0,.02);
+      font-size: 12px;
+      color: var(--text);
+      line-height: 1.45;
+      max-height: 220px;
+      overflow: auto;
+      white-space: pre-wrap;
+    }
+    .log .muted{ color: var(--muted); }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <div class="title">카카오페이지 URL → 노션 저장</div>
+    <div class="sub">
+      작품 URL을 <b>여러 줄</b>로 붙여넣고 <b>한 번에 저장</b>할 수 있어요.<br/>
+      저장 성공한 URL은 자동으로 입력창에서 제거돼요(실패한 것만 남음).
+    </div>
+
+    <label for="contentUrls">카카오페이지 작품 URL (줄바꿈으로 여러 개)</label>
+    <textarea id="contentUrls" placeholder="예:
+https://page.kakao.com/content/65171279
+https://page.kakao.com/content/12345678"></textarea>
+
+    <div class="btns">
+      <button class="primary" id="saveBtn">노션에 저장</button>
+      <button id="openFirstBtn">첫 번째 URL 열기</button>
+      <button id="clearBtn">입력 지우기</button>
+    </div>
+
+    <div class="hint">
+      작품 URL 예시: <code>https://page.kakao.com/content/65171279</code><br/>
+      서버는 저장 시 작품 메타(제목/표지/소개)도 시도하고, 막히면 URL 기반으로 저장돼요.
+    </div>
+
+    <div class="toast" id="toast">URL을 붙여넣고 “노션에 저장”을 눌러 보세요.</div>
+    <div class="log" id="log"><span class="muted">로그가 여기에 표시돼요.</span></div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    function setToast(text, cls=""){
+      const el = $("toast");
+      el.className = "toast " + cls;
+      el.textContent = text || "";
+    }
+
+    function appendLog(line){
+      const el = $("log");
+      if (el.textContent.includes("로그가 여기에 표시돼요.")) el.textContent = "";
+      el.textContent += (el.textContent ? "\n" : "") + line;
+      el.scrollTop = el.scrollHeight;
+    }
+
+    function openInNewTab(url){
+      window.open(url, "_blank", "noopener,noreferrer");
+    }
+
+    // ✅ 원본 줄 목록(공백/빈줄 포함)을 유지하면서,
+    //    유효 URL만 추출 + 중복 제거 + 유효성 검증
+    function parseTextarea(raw){
+      const lines = String(raw || "").split(/\r?\n/);
+      return lines;
+    }
+
+    function normalizeUrls(raw){
+      const lines = parseTextarea(raw);
+
+      const trimmedNonEmpty = lines.map(s => s.trim()).filter(Boolean);
+
+      // 중복 제거(순서 유지)
+      const seen = new Set();
+      const unique = [];
+      for (const u of trimmedNonEmpty){
+        if (seen.has(u)) continue;
+        seen.add(u);
+        unique.push(u);
+      }
+
+      const valid = [];
+      const invalid = [];
+
+      for (const u of unique){
+        try {
+          const parsed = new URL(u);
+          if (!/page\.kakao\.com$/i.test(parsed.hostname)){
+            invalid.push(u);
+            continue;
+          }
+          valid.push(u);
+        } catch {
+          invalid.push(u);
+        }
+      }
+      return { valid, invalid };
+    }
+
+    // ✅ 저장 성공한 URL을 textarea에서 제거 (실패/미시도 URL은 유지)
+    function removeSucceededFromTextarea(succeededSet){
+      const lines = parseTextarea($("contentUrls").value);
+
+      // 각 줄을 trim한 값이 succeededSet에 있으면 그 줄 제거
+      const kept = [];
+      for (const line of lines){
+        const t = line.trim();
+        if (!t) { kept.push(line); continue; } // 빈 줄은 유지(정리 원하면 여기서 제거 가능)
+        if (succeededSet.has(t)) continue;
+        kept.push(line);
+      }
+
+      // 연속 빈줄 과다를 조금 정리(선택): 앞뒤 공백 줄 제거 + 3줄 이상 빈줄은 2줄로 제한
+      const compact = [];
+      let emptyRun = 0;
+      for (const line of kept){
+        if (!line.trim()){
+          emptyRun++;
+          if (emptyRun <= 2) compact.push("");
+        } else {
+          emptyRun = 0;
+          compact.push(line.trim());
+        }
+      }
+
+      // 맨 앞/뒤 빈 줄 제거
+      while (compact.length && !compact[0].trim()) compact.shift();
+      while (compact.length && !compact[compact.length-1].trim()) compact.pop();
+
+      $("contentUrls").value = compact.join("\n");
+    }
+
+    async function postJson(path, payload){
+      const r = await fetch(path, {
+        method: "POST",
+        headers: { "content-type":"application/json" },
+        body: JSON.stringify(payload)
+      });
+      const text = await r.text();
+      let data;
+      try { data = JSON.parse(text); }
+      catch { data = { ok:false, error:"Non-JSON response", detail:text.slice(0,200) }; }
+      return { status: r.status, data };
+    }
+
+    function sleep(ms){ return new Promise(res => setTimeout(res, ms)); }
+
+    $("openFirstBtn").addEventListener("click", () => {
+      const { valid } = normalizeUrls($("contentUrls").value);
+      if (!valid.length) return setToast("먼저 작품 URL을 1개 이상 넣어 주세요.", "err");
+      openInNewTab(valid[0]);
+      setToast("첫 번째 URL을 새 탭으로 열었어요.");
+    });
+
+    $("clearBtn").addEventListener("click", () => {
+      $("contentUrls").value = "";
+      $("log").textContent = "로그가 여기에 표시돼요.";
+      setToast("입력을 지웠어요.");
+    });
+
+    $("saveBtn").addEventListener("click", async () => {
+      const raw = $("contentUrls").value;
+      const { valid, invalid } = normalizeUrls(raw);
+
+      if (!valid.length){
+        return setToast("저장할 URL이 없어요. 줄바꿈으로 URL을 붙여넣어 주세요.", "err");
+      }
+
+      // UI 잠금
+      $("saveBtn").disabled = true;
+      $("openFirstBtn").disabled = true;
+      $("clearBtn").disabled = true;
+
+      $("log").textContent = "";
+      if (invalid.length){
+        appendLog(`⚠️ 형식이 올바르지 않거나 허용되지 않은 URL ${invalid.length}개는 제외했어요:`);
+        for (const u of invalid) appendLog(`  - ${u}`);
+        appendLog("");
+      }
+
+      setToast(`저장 시작: ${valid.length}개`, "");
+      appendLog(`✅ 저장 시작 (${valid.length}개)`);
+
+      let okCount = 0;
+      let failCount = 0;
+
+      // ✅ 성공한 URL들을 모아두었다가 마지막에 입력창에서 제거
+      const succeeded = new Set();
+
+      const GAP_MS = 250;
+
+      for (let i = 0; i < valid.length; i++){
+        const url = valid[i];
+        setToast(`저장 중… (${i+1}/${valid.length})`, "");
+        appendLog(`⏳ (${i+1}/${valid.length}) 저장 요청: ${url}`);
+
+        try {
+          const res = await postJson("/api/notion-create", { platform: "카카오페이지", url });
+
+          if (res.data && res.data.ok){
+            okCount++;
+            succeeded.add(url);
+
+            const dbg = res.data.debug
+              ? ` (upstream: ${res.data.debug.upstreamStatus}${res.data.debug.redirectedTo ? ", redirected" : ""})`
+              : "";
+            appendLog(`✅ 완료: ${url}${dbg}`);
+          } else {
+            failCount++;
+            appendLog(`❌ 실패: ${url} — ${res.data?.error || "unknown"}`);
+          }
+        } catch (e){
+          failCount++;
+          appendLog(`❌ 실패: ${url} — ${String(e?.message || e)}`);
+        }
+
+        await sleep(GAP_MS);
+      }
+
+      // ✅ 저장 성공한 URL은 입력창에서 자동 제거 (실패한 것만 남김)
+      if (succeeded.size){
+        removeSucceededFromTextarea(succeeded);
+        appendLog("");
+        appendLog(`🧹 입력창 정리: 성공 ${succeeded.size}개 URL을 제거했어요.`);
+      }
+
+      if (failCount === 0){
+        setToast(`저장 완료! ${okCount}/${valid.length}개 성공 (입력창에서 제거됨)`, "ok");
+      } else if (okCount === 0){
+        setToast(`저장 실패… ${failCount}/${valid.length}개 실패`, "err");
+      } else {
+        setToast(`저장 완료 (성공 ${okCount}, 실패 ${failCount}) — 실패한 URL만 입력창에 남았어요`, "");
+      }
+
+      // UI 잠금 해제
+      $("saveBtn").disabled = false;
+      $("openFirstBtn").disabled = false;
+      $("clearBtn").disabled = false;
+    });
+  </script>
+</body>
+</html>
