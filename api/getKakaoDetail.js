@@ -37,10 +37,23 @@ function extractContentId(url) {
   return "";
 }
 
-// ✅ content/text/{id} 페이지의 __NEXT_DATA__에서 authors/genre 추출
+// ✅ 제목 규칙:
+// - 끝의 "| 카카오웹툰" 제거
+// - 성인(isAdult)이면 "[19세 완전판]" 붙이기
+function normalizeKakaoTitle(rawTitle, isAdult) {
+  let t = String(rawTitle || "").trim();
+  t = t.replace(/\s*\|\s*카카오웹툰\s*$/i, "").trim();
+
+  if (isAdult && t && !t.includes("[19세 완전판]")) {
+    t = `${t} [19세 완전판]`;
+  }
+  return t;
+}
+
+// ✅ content/text/{id} 페이지의 __NEXT_DATA__에서 authors/genre/isAdult/title 추출
 function parseFromTextEndpointNextData(nextJson, contentId) {
-  // (글에서 확인된 경로) props.initialState.content.contentMap[id] :contentReference[oaicite:1]{index=1}
   const id = String(contentId || "");
+
   const map =
     nextJson?.props?.initialState?.content?.contentMap ||
     nextJson?.props?.pageProps?.initialState?.content?.contentMap ||
@@ -49,23 +62,27 @@ function parseFromTextEndpointNextData(nextJson, contentId) {
   const node = map?.[id] || null;
   if (!node) return null;
 
-  // authors: string | array | object 등 변형 대비
+  // authors
   let authorName = "";
   const a = node.authors ?? node.author ?? node.authorName ?? "";
   if (typeof a === "string") authorName = a.trim();
-  else if (Array.isArray(a)) authorName = uniq(a.map(x => (typeof x === "string" ? x : x?.name))).join(", ");
-  else if (a && typeof a === "object" && a.name) authorName = String(a.name).trim();
+  else if (Array.isArray(a)) {
+    const names = a.map((x) => (typeof x === "string" ? x : x?.name)).filter(Boolean);
+    authorName = uniq(names).join(", ");
+  } else if (a && typeof a === "object" && a.name) {
+    authorName = String(a.name).trim();
+  }
 
-  // genre: string | array
+  // genre
   let genre = [];
   const g = node.genre ?? node.genres ?? [];
   if (typeof g === "string") genre = [g.trim()].filter(Boolean);
   else if (Array.isArray(g)) genre = uniq(g);
 
-  // isAdult도 여기서 더 정확할 수 있음
+  // isAdult
   const isAdult = Boolean(node.isAdult);
 
-  // title도 여기서 가져올 수 있음(ogTitle 없을 때 대비)
+  // title
   const title = (node.title || "").toString().trim();
 
   return { authorName, genre, isAdult, title };
@@ -83,7 +100,7 @@ module.exports = async function handler(req, res) {
       "Referer": "https://webtoon.kakao.com/",
     };
 
-    // 1) 원래 content URL에서 og 메타(설명/표지) 확보
+    // 1) 원래 content URL에서 메타(설명/표지/제목 후보) 확보
     const r = await fetch(url, { headers, redirect: "follow" });
     const html = await r.text();
     const $ = cheerio.load(html);
@@ -92,19 +109,17 @@ module.exports = async function handler(req, res) {
     const ogDesc = $("meta[property='og:description']").attr("content")?.trim() || "";
     const ogImage = $("meta[property='og:image']").attr("content")?.trim() || "";
 
-let rawTitle = ogTitle || $("h1,h2,h3").first().text().trim() || "";
-if (!rawTitle) rawTitle = titleFromKakaoUrl(url);
-
-// isAdult 판정은 이미 위에서 했으니까 그 값을 사용
-let title = normalizeKakaoTitle(rawTitle, isAdult);
+    // ✅ 먼저 "rawTitle"만 잡아두고
+    let rawTitle = ogTitle || $("h1,h2,h3").first().text().trim() || "";
+    if (!rawTitle) rawTitle = titleFromKakaoUrl(url);
 
     const desc = ogDesc || "";
     const cover = absolutize(ogImage);
 
-    // 기본 성인 판정(페이지 텍스트 기반)
+    // ✅ isAdult는 반드시 여기서 먼저 선언/초기화 (TDZ 방지)
     let isAdult = html.includes("19세") || html.includes("성인");
 
-    // 2) ✅ content/text/{id}에서 __NEXT_DATA__로 author/genre 확정 추출
+    // 2) content/text/{id}에서 author/genre/isAdult/title 확정 추출
     const contentId = extractContentId(url);
     let authorName = "";
     let genre = [];
@@ -113,7 +128,10 @@ let title = normalizeKakaoTitle(rawTitle, isAdult);
     if (contentId) {
       const textUrl = `https://webtoon.kakao.com/content/text/${contentId}`;
       const tr = await fetch(textUrl, {
-        headers: { ...headers, Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" },
+        headers: {
+          ...headers,
+          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        },
         redirect: "follow",
       });
 
@@ -127,17 +145,25 @@ let title = normalizeKakaoTitle(rawTitle, isAdult);
         if (picked) {
           if (picked.authorName) authorName = picked.authorName;
           if (picked.genre?.length) genre = picked.genre;
+
+          // ✅ 여기서 isAdult가 더 정확할 수 있음
           if (typeof picked.isAdult === "boolean") isAdult = picked.isAdult || isAdult;
-if (!title && picked.title) title = normalizeKakaoTitle(picked.title, isAdult);
+
+          // ✅ title도 여기서 더 정확할 수 있음 (rawTitle 갱신)
+          if (picked.title) rawTitle = picked.title;
+
           usedTextEndpoint = textUrl;
         }
       }
     }
 
+    // ✅ 최종 title은 항상 마지막에 normalize
+    const title = normalizeKakaoTitle(rawTitle, isAdult);
+
     res.setHeader("Cache-Control", "no-store");
     return res.json({
       ok: true,
-      platform: "KAKAO",
+      platform: "카카오웹툰",
       title,
       authorName,
       genre,
@@ -151,18 +177,3 @@ if (!title && picked.title) title = normalizeKakaoTitle(picked.title, isAdult);
     return res.status(500).json({ ok: false, error: String(e?.message || e) });
   }
 };
-
-function normalizeKakaoTitle(rawTitle, isAdult) {
-  let t = String(rawTitle || "").trim();
-
-  // 뒤에 붙는 "| 카카오웹툰" 제거
-  t = t.replace(/\s*\|\s*카카오웹툰\s*$/i, "").trim();
-
-  // 19세면 접미사 붙이기
-  if (isAdult && t && !t.includes("[19세 완전판]")) {
-    t = t + " [19세 완전판]";
-  }
-
-  return t;
-}
-
