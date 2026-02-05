@@ -20,24 +20,13 @@ function normalizeArray(v) {
   return [];
 }
 
-// ✅ 노션용 텍스트: 줄바꿈 유지 + 과다 줄바꿈 정리
+// ✅ 줄바꿈 유지 + 과다 줄바꿈 정리
 function normalizeNotionText(v) {
   if (v == null) return "";
   return String(v)
     .replace(/\r\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
-}
-
-// ✅ rich_text를 2000자 단위로 쪼개서 전체 저장(줄바꿈은 유지됨)
-function toRichTextChunks(value, chunkSize = 2000) {
-  const s = value == null ? "" : String(value);
-  const out = [];
-  for (let i = 0; i < s.length; i += chunkSize) {
-    const chunk = s.slice(i, i + chunkSize);
-    if (chunk.trim()) out.push({ type: "text", text: { content: chunk } });
-  }
-  return out.slice(0, 100);
 }
 
 function normName(s) {
@@ -66,7 +55,6 @@ function findPropByNameAndType(props, nameCandidates, typeCandidates) {
   return null;
 }
 
-// ✅ Select 옵션 자동 생성(플랫폼/장르)
 async function ensureSelectOption(databaseId, dbProps, propName, value) {
   if (!value) return { added: [] };
   const prop = dbProps[propName];
@@ -85,7 +73,6 @@ async function ensureSelectOption(databaseId, dbProps, propName, value) {
   return { added: [value] };
 }
 
-// ✅ Multi-select 옵션 자동 생성(키워드)
 async function ensureMultiSelectOptions(databaseId, dbProps, propName, values) {
   const arr = normalizeArray(values);
   if (!arr.length) return { added: [] };
@@ -129,6 +116,35 @@ function setMultiSelectValue(props, propName, values) {
   return { multi_select: arr.map((name) => ({ name })) };
 }
 
+/**
+ * ✅ 문단이 "나뉘어서" 보이게 rich_text 생성
+ * - 빈 줄(문단 구분)은 "\n\n"로 유지
+ * - 문단마다 별도 rich_text 아이템으로 넣고,
+ *   각 문단 뒤에 "\n\n"를 붙여서 Notion에서 문단처럼 보이게 함
+ * - 2000자 제한 고려하여 추가로 쪼갬
+ */
+function toRichTextParagraphs(value, chunkSize = 2000) {
+  const text = normalizeNotionText(value);
+  if (!text) return [];
+
+  const paragraphs = text.split(/\n{2,}/g).map((p) => p.trim()).filter(Boolean);
+
+  const out = [];
+  for (let i = 0; i < paragraphs.length; i++) {
+    // 문단 사이 빈 줄 유지
+    const paraWithGap = i < paragraphs.length - 1 ? paragraphs[i] + "\n\n" : paragraphs[i];
+
+    // Notion 2000자 제한 대응
+    for (let j = 0; j < paraWithGap.length; j += chunkSize) {
+      const chunk = paraWithGap.slice(j, j + chunkSize);
+      if (chunk) out.push({ type: "text", text: { content: chunk } });
+      if (out.length >= 100) break;
+    }
+    if (out.length >= 100) break;
+  }
+  return out.slice(0, 100);
+}
+
 // ---------------- handler ----------------
 module.exports = async (req, res) => {
   // CORS
@@ -141,9 +157,7 @@ module.exports = async (req, res) => {
 
   let body = req.body;
   if (typeof body === "string") {
-    try {
-      body = JSON.parse(body);
-    } catch {}
+    try { body = JSON.parse(body); } catch {}
   }
 
   const title = body?.title?.toString().trim();
@@ -153,15 +167,18 @@ module.exports = async (req, res) => {
   const coverUrl = body?.coverUrl?.toString().trim() || "";
   const isAdult = toBoolean(body?.isAdult);
 
-  const authorName = (body?.authorName ?? "").toString().trim();
-  const publisherName = (body?.publisherName ?? "").toString().trim();
+  // ✅ 플랫폼: body.platform 우선
+  const platformValue = (body?.platform || "RIDI").toString().trim() || "RIDI";
+
+  const authorName = (body?.authorName ?? body?.author ?? "").toString().trim();
+  const publisherName = (body?.publisherName ?? body?.publisher ?? "").toString().trim();
 
   const genreArr = normalizeArray(body?.genre);
-  const tagsArr = normalizeArray(body?.tags);
+  const tagsArr = normalizeArray(body?.tags ?? body?.keywords);
 
-  // ✅ 줄바꿈 유지 텍스트
+  // ✅ 카카오 위젯 desc도 수용
   const guideText = normalizeNotionText(body?.guide ?? body?.romanceGuide ?? "");
-  const descText = normalizeNotionText(body?.description ?? body?.meta ?? "");
+  const descText = normalizeNotionText(body?.description ?? body?.meta ?? body?.desc ?? "");
 
   try {
     const databaseId = process.env.NOTION_DB_ID;
@@ -171,7 +188,7 @@ module.exports = async (req, res) => {
     let db = await notion.databases.retrieve({ database_id: databaseId });
     let props = db?.properties || {};
 
-    // ---- property mapping (네 DB 이름 기준) ----
+    // ---- property mapping (네 DB 타입 기준) ----
     const titleProp =
       findPropByNameAndType(props, ["제목", "title", "name", "이름"], "title") ||
       firstPropOfType(props, "title");
@@ -182,8 +199,6 @@ module.exports = async (req, res) => {
     const coverProp =
       findPropByNameAndType(props, ["표지", "커버", "cover", "이미지"], "files") ||
       firstPropOfType(props, "files");
-
-    // ✅ 별점 관련 mapping 제거
 
     const authorProp =
       findPropByNameAndType(props, ["작가명", "작가", "저자", "author"], "rich_text") || null;
@@ -216,10 +231,9 @@ module.exports = async (req, res) => {
     }
 
     // ---- 값 결정 ----
-    const platformValue = "RIDI";         // 플랫폼은 항상 RIDI
-    const genreValue = genreArr[0] || ""; // 장르는 1개만(Select)
+    const genreValue = genreArr[0] || "";
 
-    // 키워드(Multi): tags + (성인일 때 19 추가)
+    // 키워드: tags + (성인일 때 19 추가)
     const keywordValues = isAdult
       ? Array.from(new Set([...tagsArr, "19"]))
       : Array.from(new Set(tagsArr));
@@ -242,7 +256,7 @@ module.exports = async (req, res) => {
       createdOptions.keywords = r.added;
     }
 
-    // 옵션을 추가했으면 스키마 다시 읽기
+    // 옵션 추가했으면 스키마 다시 읽기
     if (createdOptions.platform.length || createdOptions.genre.length || createdOptions.keywords.length) {
       db = await notion.databases.retrieve({ database_id: databaseId });
       props = db?.properties || {};
@@ -269,11 +283,11 @@ module.exports = async (req, res) => {
     }
 
     if (authorProp && props[authorProp]?.type === "rich_text" && authorName) {
-      properties[authorProp] = { rich_text: toRichTextChunks(authorName) };
+      properties[authorProp] = { rich_text: toRichTextParagraphs(authorName) };
     }
 
     if (publisherProp && props[publisherProp]?.type === "rich_text" && publisherName) {
-      properties[publisherProp] = { rich_text: toRichTextChunks(publisherName) };
+      properties[publisherProp] = { rich_text: toRichTextParagraphs(publisherName) };
     }
 
     if (genreProp && genreValue) {
@@ -286,12 +300,13 @@ module.exports = async (req, res) => {
       if (v) properties[keywordsProp] = v;
     }
 
+    // ✅ 속성 칸에만 저장 + 문단 유지
     if (guideProp && props[guideProp]?.type === "rich_text" && guideText.trim()) {
-      properties[guideProp] = { rich_text: toRichTextChunks(guideText) };
+      properties[guideProp] = { rich_text: toRichTextParagraphs(guideText) };
     }
 
     if (descProp && props[descProp]?.type === "rich_text" && descText.trim()) {
-      properties[descProp] = { rich_text: toRichTextChunks(descText) };
+      properties[descProp] = { rich_text: toRichTextParagraphs(descText) };
     }
 
     const created = await notion.pages.create({
