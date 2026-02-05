@@ -16,6 +16,7 @@
     .adult { background:#444; color:#bbb; padding:6px; border-radius:6px; text-align:center; margin-top:8px; }
     .error { margin-top:10px; background:#2a1515; color:#ffb4b4; padding:10px; border-radius:8px; font-size:12px; white-space:pre-wrap; }
     .loading { margin-top:10px; color:#bbb; font-size:12px; }
+    a { color:#9ecbff; }
   </style>
 </head>
 <body>
@@ -74,12 +75,12 @@
         if (!data.ok) throw new Error(data.error || "searchKakao failed");
 
         if (!data.items || data.items.length === 0) {
-          list.innerHTML = `<div class="hint">검색 결과가 없어요.</div>`;
+          list.innerHTML = `<div class="hint">검색 결과가 없어요. (usedEndpoint: ${data.usedEndpoint || ""})</div>`;
           return;
         }
 
         list.innerHTML = data.items.map(i =>
-          `<div class="item" data-id="${i.contentId}">${i.title}</div>`
+          `<div class="item" data-url="${encodeURIComponent(i.link)}">${i.title}</div>`
         ).join("");
       } catch (e) {
         showError("검색 실패: " + (e?.message || e));
@@ -94,15 +95,15 @@
     });
 
     list.addEventListener("click", async (e) => {
-      const id = e.target.dataset.id;
-      if (!id) return;
+      const encodedUrl = e.target.dataset.url;
+      if (!encodedUrl) return;
 
       clearError();
       detail.innerHTML = "";
       setLoading("상세 불러오는 중...");
 
       try {
-        const res = await fetch("/api/getKakaoDetail?contentId=" + encodeURIComponent(id));
+        const res = await fetch("/api/getKakaoDetail?url=" + encodedUrl);
         const d = await res.json();
         if (!d.ok) throw new Error(d.error || "getKakaoDetail failed");
 
@@ -111,7 +112,7 @@
           ${d.isAdult ? `<div class="adult">19세 이용가</div>` : (d.cover ? `<img src="${d.cover}" />` : "")}
           <div class="hint">${d.platform || ""}</div>
           <p style="font-size:13px; line-height:1.45;">${d.desc || ""}</p>
-          <div class="hint"><a href="${d.url}" target="_blank" style="color:#9ecbff;">카카오웹툰에서 열기</a></div>
+          <div class="hint"><a href="${d.url}" target="_blank">카카오웹툰에서 열기</a></div>
         `;
       } catch (e) {
         showError("상세 실패: " + (e?.message || e));
