@@ -16,13 +16,6 @@ function uniq(arr) {
   return Array.from(new Set((arr || []).map((x) => String(x || "").trim()).filter(Boolean)));
 }
 
-function normalizeGenreValue(v) {
-  if (!v) return [];
-  if (Array.isArray(v)) return uniq(v);
-  if (typeof v === "string") return uniq(v.split(/[,/|]/g).map(s => s.trim()));
-  return [];
-}
-
 function titleFromKakaoUrl(url) {
   try {
     const u = String(url || "").trim();
@@ -37,117 +30,45 @@ function titleFromKakaoUrl(url) {
 
 function extractContentId(url) {
   const u = String(url || "");
-  // /content/작품명/2760
   const m = u.match(/\/content\/[^/]+\/(\d+)/);
   if (m) return m[1];
-  // 혹시 /content/2760 형태
   const m2 = u.match(/\/content\/(\d+)/);
   if (m2) return m2[1];
   return "";
 }
 
-// JSON-LD에서 author/genre 뽑기(가능하면)
-function parseJsonLd($) {
+// ✅ content/text/{id} 페이지의 __NEXT_DATA__에서 authors/genre 추출
+function parseFromTextEndpointNextData(nextJson, contentId) {
+  // (글에서 확인된 경로) props.initialState.content.contentMap[id] :contentReference[oaicite:1]{index=1}
+  const id = String(contentId || "");
+  const map =
+    nextJson?.props?.initialState?.content?.contentMap ||
+    nextJson?.props?.pageProps?.initialState?.content?.contentMap ||
+    null;
+
+  const node = map?.[id] || null;
+  if (!node) return null;
+
+  // authors: string | array | object 등 변형 대비
   let authorName = "";
+  const a = node.authors ?? node.author ?? node.authorName ?? "";
+  if (typeof a === "string") authorName = a.trim();
+  else if (Array.isArray(a)) authorName = uniq(a.map(x => (typeof x === "string" ? x : x?.name))).join(", ");
+  else if (a && typeof a === "object" && a.name) authorName = String(a.name).trim();
+
+  // genre: string | array
   let genre = [];
+  const g = node.genre ?? node.genres ?? [];
+  if (typeof g === "string") genre = [g.trim()].filter(Boolean);
+  else if (Array.isArray(g)) genre = uniq(g);
 
-  const scripts = $("script[type='application/ld+json']").toArray();
-  for (const s of scripts) {
-    const raw = $(s).text();
-    if (!raw) continue;
+  // isAdult도 여기서 더 정확할 수 있음
+  const isAdult = Boolean(node.isAdult);
 
-    const data = safeJsonParse(raw);
-    if (!data) continue;
+  // title도 여기서 가져올 수 있음(ogTitle 없을 때 대비)
+  const title = (node.title || "").toString().trim();
 
-    const nodes = Array.isArray(data) ? data : [data];
-
-    for (const node of nodes) {
-      if (!node || typeof node !== "object") continue;
-
-      const takeName = (x) => {
-        if (!x) return [];
-        if (typeof x === "string") return [x.trim()];
-        if (Array.isArray(x)) return x.flatMap(takeName);
-        if (typeof x === "object") return x.name ? [String(x.name).trim()] : [];
-        return [];
-      };
-
-      if (!authorName) {
-        const names = uniq([
-          ...takeName(node.author),
-          ...takeName(node.creator),
-          ...takeName(node.contributor),
-        ]);
-        if (names.length) authorName = names.join(", ");
-      }
-
-      if (genre.length === 0) {
-        genre = normalizeGenreValue(node.genre);
-      }
-      if (genre.length === 0 && node.keywords) {
-        genre = normalizeGenreValue(node.keywords);
-      }
-
-      if (authorName || genre.length) break;
-    }
-
-    if (authorName || genre.length) break;
-  }
-
-  return { authorName, genre };
-}
-
-// 내부 API 응답(JSON)에서 작가/장르를 최대한 넓게 추출
-function extractAuthorGenreFromApiJson(j) {
-  let authorName = "";
-  let genre = [];
-
-  const pickNames = (x) => {
-    if (!x) return [];
-    if (typeof x === "string") return [x.trim()];
-    if (Array.isArray(x)) return x.flatMap(pickNames);
-    if (typeof x === "object") {
-      if (x.name) return [String(x.name).trim()];
-      if (x.penName) return [String(x.penName).trim()];
-    }
-    return [];
-  };
-
-  // 후보 키들(구조가 바뀔 수 있어서 넓게)
-  const authorRoots = [
-    j.author, j.authors, j.creator, j.creators, j.contributor, j.contributors,
-    j.writer, j.writers, j.artist, j.artists,
-    j.content?.author, j.content?.authors, j.content?.creators,
-    j.result?.author, j.result?.authors, j.data?.author, j.data?.authors,
-  ];
-
-  const names = uniq(authorRoots.flatMap(pickNames)).filter(s => s.length <= 50);
-  if (names.length) authorName = names.join(", ");
-
-  const genreRoots = [
-    j.genre, j.genres, j.category, j.categories, j.tags,
-    j.content?.genre, j.content?.genres, j.content?.categories,
-    j.result?.genre, j.result?.genres, j.data?.genre, j.data?.genres,
-  ];
-
-  const genreNames = uniq(genreRoots.flatMap(pickNames)).filter(s => s.length <= 30);
-  if (genreNames.length) genre = genreNames.slice(0, 5);
-
-  return { authorName, genre };
-}
-
-async function tryFetchJson(url, headers) {
-  try {
-    const r = await fetch(url, { headers, redirect: "follow" });
-    if (!r.ok) return null;
-    const ct = (r.headers.get("content-type") || "").toLowerCase();
-    // json이 아니어도 body가 json일 때가 있어서 그냥 텍스트로 파싱
-    const text = await r.text();
-    const j = safeJsonParse(text);
-    return j || null;
-  } catch {
-    return null;
-  }
+  return { authorName, genre, isAdult, title };
 }
 
 module.exports = async function handler(req, res) {
@@ -162,6 +83,7 @@ module.exports = async function handler(req, res) {
       "Referer": "https://webtoon.kakao.com/",
     };
 
+    // 1) 원래 content URL에서 og 메타(설명/표지) 확보
     const r = await fetch(url, { headers, redirect: "follow" });
     const html = await r.text();
     const $ = cheerio.load(html);
@@ -175,40 +97,37 @@ module.exports = async function handler(req, res) {
 
     const desc = ogDesc || "";
     const cover = absolutize(ogImage);
-    const isAdult = html.includes("19세") || html.includes("성인");
 
-    // 1) JSON-LD 시도
-    let { authorName, genre } = parseJsonLd($);
+    // 기본 성인 판정(페이지 텍스트 기반)
+    let isAdult = html.includes("19세") || html.includes("성인");
 
-    // 2) 내부 API fallback 시도 (작가/장르가 비거나 부족할 때)
+    // 2) ✅ content/text/{id}에서 __NEXT_DATA__로 author/genre 확정 추출
     const contentId = extractContentId(url);
-    let usedApi = "";
-    if (contentId && (!authorName || genre.length === 0)) {
-      const candidates = [
-        // ✅ 가장 흔한 패턴들 (가능한 걸 “자동으로” 시도)
-        `https://webtoon.kakao.com/api/v1/content/${contentId}`,
-        `https://webtoon.kakao.com/api/v1/contents/${contentId}`,
-        `https://webtoon.kakao.com/api/v2/content/${contentId}`,
-        `https://webtoon.kakao.com/api/v2/contents/${contentId}`,
-        `https://webtoon.kakao.com/api/v1/content/${contentId}/detail`,
-        `https://webtoon.kakao.com/api/v1/contents/${contentId}/detail`,
-        `https://webtoon.kakao.com/api/v1/content/${contentId}/home`,
-        `https://webtoon.kakao.com/api/v1/contents/${contentId}/home`,
-      ];
+    let authorName = "";
+    let genre = [];
+    let usedTextEndpoint = "";
 
-      for (const apiUrl of candidates) {
-        const j = await tryFetchJson(apiUrl, {
-          ...headers,
-          Accept: "application/json,text/plain,*/*",
-        });
-        if (!j) continue;
+    if (contentId) {
+      const textUrl = `https://webtoon.kakao.com/content/text/${contentId}`;
+      const tr = await fetch(textUrl, {
+        headers: { ...headers, Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" },
+        redirect: "follow",
+      });
 
-        const picked = extractAuthorGenreFromApiJson(j);
-        if (!authorName && picked.authorName) authorName = picked.authorName;
-        if (genre.length === 0 && picked.genre.length) genre = picked.genre;
+      const thtml = await tr.text();
+      const $t = cheerio.load(thtml);
+      const nextRaw = $t("#__NEXT_DATA__").text() || "";
+      const nextJson = safeJsonParse(nextRaw);
 
-        usedApi = apiUrl;
-        if (authorName && genre.length) break;
+      if (nextJson) {
+        const picked = parseFromTextEndpointNextData(nextJson, contentId);
+        if (picked) {
+          if (picked.authorName) authorName = picked.authorName;
+          if (picked.genre?.length) genre = picked.genre;
+          if (typeof picked.isAdult === "boolean") isAdult = picked.isAdult || isAdult;
+          if (!title && picked.title) title = picked.title;
+          usedTextEndpoint = textUrl;
+        }
       }
     }
 
@@ -223,8 +142,7 @@ module.exports = async function handler(req, res) {
       cover,
       isAdult,
       url,
-      // 디버그(문제 계속이면 어떤 API가 됐는지 확인용)
-      ...(req.query.debug ? { contentId, usedApi } : {}),
+      ...(req.query.debug ? { contentId, usedTextEndpoint } : {}),
     });
   } catch (e) {
     return res.status(500).json({ ok: false, error: String(e?.message || e) });
