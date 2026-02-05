@@ -1,47 +1,5 @@
 <!doctype html>
 <html lang="ko">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>RIDI → Notion 위젯</title>
-  <style>
-    :root{
-      --ridi:#1f8ce6; --bg:#fff; --line:#e6e8ee; --text:#111827; --muted:#6b7280;
-    }
-    *{box-sizing:border-box}
-    body{margin:0; padding:16px; background:transparent; font-family:system-ui,-apple-system,"Noto Sans KR","Apple SD Gothic Neo","Malgun Gothic",sans-serif; color:var(--text);}
-    .ridi-frame{border:2px solid var(--ridi); border-radius:16px; padding:6px; background:transparent;}
-    .ridi-frame-inner{border:1px solid var(--line); border-radius:12px; background:var(--bg); display:flex; gap:14px; padding:14px; align-items:center;}
-    .cover{width:64px; height:64px; border-radius:12px; background:#f3f4f6; display:flex; align-items:center; justify-content:center; flex:0 0 auto;}
-    .ridi-logo{display:flex; align-items:center; gap:8px; user-select:none;}
-    .ridi-mark{width:26px; height:26px; border-radius:8px; background:var(--ridi); color:#fff; font-weight:800; font-size:14px; display:grid; place-items:center;}
-    .ridi-word{color:var(--ridi); font-weight:900; letter-spacing:.02em; font-size:15px;}
-    .info{flex:1 1 auto; min-width:0;}
-    .title{font-size:16px; font-weight:800; margin:0 0 4px;}
-    .meta{font-size:12px; color:var(--muted); margin:0 0 10px;}
-    .search-wrap{position:relative; width:min(520px,100%);}
-    .search{display:flex; align-items:center; gap:8px; background:#f7f7fb; border:1px solid var(--line); border-radius:999px; padding:8px 12px; width:100%;}
-    .search-icon{color:#9aa3af; flex:0 0 auto;}
-    #searchInput{border:0; outline:0; background:transparent; width:100%; font-size:13px;}
-    .result-popover{position:absolute; left:0; right:0; top:calc(100% + 10px); background:#fff; border:1px solid var(--line); border-radius:14px;
-      box-shadow:0 18px 44px rgba(17,24,39,.12); padding:10px; z-index:50; max-height:380px; overflow:auto; display:none;}
-    .results{display:grid; gap:10px;}
-    .result-item{display:flex; gap:10px; padding:10px; border:1px solid var(--line); border-radius:12px; cursor:pointer; transition:.05s; background:#fff;}
-    .result-item:hover{transform:translateY(-1px); box-shadow:0 6px 16px rgba(17,24,39,.08);}
-    .result-thumb{position:relative; width:46px; height:66px; border-radius:10px; overflow:hidden; background:#f3f4f6; flex:0 0 auto;}
-    .result-thumb img{width:100%; height:100%; object-fit:cover; display:block;}
-    .badge19{position:absolute; top:6px; right:6px; padding:2px 6px; border-radius:999px; background:rgba(0,0,0,.78); color:#fff; font-size:11px; font-weight:800;}
-    .result-info{min-width:0; display:flex; flex-direction:column; justify-content:center;}
-    .result-title{font-size:14px; font-weight:800; line-height:1.25; margin:0 0 4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
-    .empty-msg{color:var(--muted); font-size:13px; padding:6px 2px;}
-  </style>
-</head>
-<body>
-  <div class="ridi-frame">
-    <div class="ridi-frame-inner">
-      <div class="cover" aria-hidden="true">
-        <div class="ridi-logo" title="RIDI">
-          <div class="ridi-word">RIDI</div>
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -230,131 +188,21 @@
           <!-- 로고 이미지 파일을 쓰고 있다면 경로만 맞춰줘 (예: /ridi.png) -->
           <!-- <img src="/ridi.png" alt="RIDI" /> -->
           <div class="logo-text">RIDI</div>
-</div>
-      </div>
+        </div>
 
-      <div class="info">
-        <p class="meta">웹소설 · 웹툰</p>
         <div class="meta">
           <div class="meta-top">웹소설 · 웹툰</div>
 
-        <div class="search-wrap" id="searchWrap">
-          <form id="searchForm" class="search">
-            <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.5"/>
-              <line x1="16.65" y1="16.65" x2="21" y2="21" stroke="currentColor" stroke-width="1.5"/>
-            </svg>
-            <input id="searchInput" type="text" placeholder="제목 검색" autocomplete="off" />
-          </form>
           <div class="search-wrap">
             <form id="searchForm" autocomplete="off">
               <input id="searchInput" type="text" placeholder="제목 검색" />
             </form>
 
-          <div id="resultPopover" class="result-popover">
-<div id="results" class="results"></div>
-</div>
-</div>
-</div>
-</div>
-  </div>
-
-<script>
-  const SERVER = "https://notion-widget-server1.vercel.app";
-
-  function fallbackCover(title) {
-    return `https://placehold.co/300x450.png?text=${encodeURIComponent(title || "cover")}`;
-  }
-  function safeStr(v){ return v==null ? "" : String(v).trim(); }
-
-  const popover = document.getElementById("resultPopover");
-  const resultsRoot = document.getElementById("results");
-  const searchWrap = document.getElementById("searchWrap");
-  const inputEl = document.getElementById("searchInput");
-
-  function openPopover(){ popover.style.display = "block"; }
-  function closePopover(){ popover.style.display = "none"; }
-
-  function normalizeQuery(q){
-    return String(q||"")
-      .replace(/\[[^\]]*\]/g,"")
-      .replace(/\([^)]*\)/g,"")
-      .replace(/[·:：\-–—]/g," ")
-      .replace(/\s+/g," ")
-      .trim();
-  }
-
-  let searchAbort = null;
-  async function searchRidi(q){
-    if(searchAbort) searchAbort.abort();
-    searchAbort = new AbortController();
-    const res = await fetch(`${SERVER}/api/searchRidi?q=${encodeURIComponent(q)}&debug=0`, { signal: searchAbort.signal });
-    return res.json();
-  }
-  async function getRidiDetail({link, bookId}){
-    const qs = link ? `link=${encodeURIComponent(link)}` : `bookId=${encodeURIComponent(bookId||"")}`;
-    const res = await fetch(`${SERVER}/api/getRidiDetail?${qs}&debug=0`);
-    return res.json();
-  }
-  async function addToNotion(payload){
-    const res = await fetch(`${SERVER}/api/addToNotion`, {
-      method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(payload)
-    });
-    const data = await res.json().catch(()=> ({}));
-    if(!res.ok || !data.ok) throw new Error(data.error || "저장 실패");
-    return data;
-  }
-
-  async function smartSearch(query){
-    const original = String(query||"").trim();
-    let data = await searchRidi(original);
-    if(data?.ok && data.items?.length) return data;
-
-    const cleaned = normalizeQuery(original);
-    if(cleaned && cleaned !== original){
-      data = await searchRidi(cleaned);
-      if(data?.ok && data.items?.length) return data;
-    }
-
-    const words = cleaned.split(" ").filter(Boolean);
-    const shortQ = words.slice(0,2).join(" ");
-    if(shortQ && shortQ !== cleaned){
-      data = await searchRidi(shortQ);
-    }
-    return data;
-  }
-
-  function renderResults(items){
-    resultsRoot.innerHTML = "";
-    if(!items || items.length === 0){
-      resultsRoot.innerHTML = `<div class="empty-msg">검색 결과가 없어요</div>`;
-      return;
-    }
-
-    items.forEach((it)=>{
-      const coverOriginal = safeStr(it.coverUrl);
-      const isAdultCover = coverOriginal.includes("cover_adult.png");
-      const displayCover = coverOriginal ? (isAdultCover ? fallbackCover(it.title) : coverOriginal) : fallbackCover(it.title);
-      const proxiedDisplayCover = `${SERVER}/api/imageProxy?url=${encodeURIComponent(displayCover)}`;
-      const isAdult = Boolean(it.isAdult || isAdultCover);
-
-      const row = document.createElement("div");
-      row.className = "result-item";
-
-      const thumb = document.createElement("div");
-      thumb.className = "result-thumb";
-
-      const img = document.createElement("img");
-      img.src = proxiedDisplayCover;
-      img.alt = "";
-      img.onerror = () => { img.src = fallbackCover(it.title); };
-      thumb.appendChild(img);
-
-      if(isAdult){
-        const badge = document.createElement("span");
-        badge.className = "badge19";
-        badge.textContent = "19";
-        thumb.appendChild(badge);
+            <div id="results" class="results"></div>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <script>
       // ⚠️ 아래 API 경로는 네 프로젝트에 맞게 유지/수정 필요
@@ -372,90 +220,15 @@
       }
       function closeResults() {
         $results.classList.remove("open");
-}
+      }
 
-      const info = document.createElement("div");
-      info.className = "result-info";
-
-      const title = document.createElement("div");
-      title.className = "result-title";
-      title.textContent = it.title || "(제목 없음)";
-      info.appendChild(title);
-
-      row.appendChild(thumb);
-      row.appendChild(info);
-
-      row.addEventListener("click", async ()=>{
-        row.style.pointerEvents="none";
-        row.style.opacity="0.6";
-        try{
-          const detail = await getRidiDetail({ link: it.link, bookId: it.bookId });
-          if(!detail?.ok) throw new Error(detail?.error || "상세 정보를 가져오지 못했어요");
-
-          const payloadTitle = safeStr(detail.title) || safeStr(it.title);
-
-          const detailCover = safeStr(detail.coverUrl);
-          const finalCoverOriginal = detailCover || coverOriginal || displayCover;
-
-          const finalIsAdult =
-            Boolean(detail.isAdult) ||
-            Boolean(isAdult) ||
-            finalCoverOriginal.includes("cover_adult.png");
-
-          // ✅ A안: 성인작품이면 노션 표지 저장 안 함
-          const coverForNotion = finalIsAdult ? "" : finalCoverOriginal;
-
-          const payload = {
-            title: payloadTitle,
-            link: it.link,
-            url: it.link,
-            coverUrl: coverForNotion,
-            isAdult: finalIsAdult,
-            authorName: safeStr(detail.authorName),
-            publisherName: safeStr(detail.publisherName),
-            rating: detail.rating,
-            genre: Array.isArray(detail.genre) ? detail.genre : [],
-            tags: Array.isArray(detail.tags) ? detail.tags : [],
-            description: safeStr(detail.description),
-            guide: safeStr(detail.guide),
-            bookId: detail.bookId || it.bookId || undefined,
-          };
-
-          await addToNotion(payload);
-          closePopover(); // 저장 후 닫기 (원하면 삭제)
-        }catch(e){
-          console.error("save error:", e);
-        }finally{
-          row.style.pointerEvents="";
-          row.style.opacity="";
       function render(items) {
         if (!items || items.length === 0) {
           $results.innerHTML = `<div class="empty">검색 결과가 없어요.</div>`;
           openResults();
           return;
-}
-      });
+        }
 
-      resultsRoot.appendChild(row);
-    });
-  }
-
-  function debounce(fn, wait=400){
-    let t=null;
-    return (...args)=>{ clearTimeout(t); t=setTimeout(()=>fn(...args), wait); };
-  }
-
-  const runSearch = debounce(async (q)=>{
-    const query = String(q||"").trim();
-    if(!query){
-      closePopover(); resultsRoot.innerHTML=""; return;
-    }
-    openPopover();
-    try{
-      const data = await smartSearch(query);
-      if(!data?.ok){
-        resultsRoot.innerHTML = `<div class="empty-msg">검색에 실패했어요</div>`;
-        return;
         $results.innerHTML = items
           .slice(0, 8)
           .map((it) => {
@@ -496,28 +269,7 @@
           $results.innerHTML = `<div class="empty">검색 중 오류가 발생했어요.</div>`;
           openResults();
         }
-}
-      renderResults(data.items);
-    }catch(e){
-      if(e?.name==="AbortError") return;
-      resultsRoot.innerHTML = `<div class="empty-msg">검색 오류가 발생했어요</div>`;
-      console.error(e);
-    }
-  }, 400);
-
-  document.getElementById("searchForm").addEventListener("submit", (e)=>{
-    e.preventDefault();
-    runSearch(inputEl.value.trim());
-  });
-  inputEl.addEventListener("input", (e)=> runSearch(e.target.value));
-  inputEl.addEventListener("focus", ()=> { if(String(inputEl.value||"").trim()) openPopover(); });
-
-  document.addEventListener("mousedown", (e)=>{ if(!searchWrap.contains(e.target)) closePopover(); });
-  document.addEventListener("keydown", (e)=>{ if(e.key==="Escape") closePopover(); });
-
-  closePopover();
-</script>
-</body>
+      }
 
       $input.addEventListener("input", () => {
         const q = $input.value.trim();
