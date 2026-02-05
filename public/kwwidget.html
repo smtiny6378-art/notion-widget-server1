@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <title>Kakao Webtoon Widget</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: system-ui, sans-serif;
+      background: #111;
+      color: #fff;
+    }
+    .card {
+      padding: 16px;
+      border-radius: 12px;
+      background: #1c1c1c;
+      width: 320px;
+    }
+    input {
+      width: 100%;
+      padding: 10px;
+      border-radius: 8px;
+      border: none;
+      outline: none;
+    }
+    .item {
+      padding: 8px;
+      border-bottom: 1px solid #333;
+      cursor: pointer;
+    }
+    .item:hover {
+      background: #222;
+    }
+    img {
+      width: 100%;
+      border-radius: 8px;
+      margin-top: 8px;
+    }
+    .adult {
+      background: #444;
+      color: #bbb;
+      padding: 6px;
+      border-radius: 6px;
+      text-align: center;
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <input id="q" placeholder="카카오웹툰 제목 검색" />
+    <div id="list"></div>
+    <div id="detail"></div>
+  </div>
+
+  <script>
+    const q = document.getElementById("q");
+    const list = document.getElementById("list");
+    const detail = document.getElementById("detail");
+
+    q.addEventListener("change", async () => {
+      const res = await fetch("/api/searchKakao?q=" + encodeURIComponent(q.value));
+      const data = await res.json();
+      list.innerHTML = data.items.map(i =>
+        `<div class="item" data-id="${i.contentId}">${i.title}</div>`
+      ).join("");
+    });
+
+    list.addEventListener("click", async (e) => {
+      const id = e.target.dataset.id;
+      if (!id) return;
+
+      const res = await fetch("/api/getKakaoDetail?contentId=" + id);
+      const d = await res.json();
+
+      detail.innerHTML = `
+        <h3>${d.title}</h3>
+        ${d.isAdult ? `<div class="adult">19세 이용가</div>` : `<img src="${d.cover}" />`}
+        <div>${d.author}</div>
+        <p>${d.desc}</p>
+      `;
+    });
+  </script>
+</body>
+</html>
