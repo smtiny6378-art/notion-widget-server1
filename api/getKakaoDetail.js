@@ -92,8 +92,11 @@ module.exports = async function handler(req, res) {
     const ogDesc = $("meta[property='og:description']").attr("content")?.trim() || "";
     const ogImage = $("meta[property='og:image']").attr("content")?.trim() || "";
 
-    let title = ogTitle || $("h1,h2,h3").first().text().trim() || "";
-    if (!title) title = titleFromKakaoUrl(url);
+let rawTitle = ogTitle || $("h1,h2,h3").first().text().trim() || "";
+if (!rawTitle) rawTitle = titleFromKakaoUrl(url);
+
+// isAdult 판정은 이미 위에서 했으니까 그 값을 사용
+let title = normalizeKakaoTitle(rawTitle, isAdult);
 
     const desc = ogDesc || "";
     const cover = absolutize(ogImage);
@@ -125,7 +128,7 @@ module.exports = async function handler(req, res) {
           if (picked.authorName) authorName = picked.authorName;
           if (picked.genre?.length) genre = picked.genre;
           if (typeof picked.isAdult === "boolean") isAdult = picked.isAdult || isAdult;
-          if (!title && picked.title) title = picked.title;
+if (!title && picked.title) title = normalizeKakaoTitle(picked.title, isAdult);
           usedTextEndpoint = textUrl;
         }
       }
