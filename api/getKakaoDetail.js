@@ -62,7 +62,7 @@ function collectByKeys(obj, keyCandidates) {
   return out;
 }
 
-// JSON-LD에서 author/genre 뽑기
+// JSON-LD에서 author/genre 뽑기(creator/contributor까지 포함)
 function parseJsonLd($) {
   let authorName = "";
   let genre = [];
@@ -80,28 +80,34 @@ function parseJsonLd($) {
     for (const node of nodes) {
       if (!node || typeof node !== "object") continue;
 
-      // author: string | {name} | [{name}]
-      const a = node.author;
-      if (!authorName && a) {
-        if (typeof a === "string") authorName = a.trim();
-        else if (Array.isArray(a)) {
-          const names = a.map(x => (typeof x === "string" ? x : x?.name)).filter(Boolean);
-          authorName = uniq(names).join(", ");
-        } else if (typeof a === "object" && a.name) {
-          authorName = String(a.name).trim();
+      const takeName = (x) => {
+        if (!x) return [];
+        if (typeof x === "string") return [x.trim()];
+        if (Array.isArray(x)) return x.flatMap(takeName);
+        if (typeof x === "object") {
+          if (x.name) return [String(x.name).trim()];
+          // creator/author가 Person 형태일 때
+          if (x["@type"] === "Person" && x.name) return [String(x.name).trim()];
         }
+        return [];
+      };
+
+      // author → 없으면 creator/contributor도 시도
+      if (!authorName) {
+        const names = uniq([
+          ...takeName(node.author),
+          ...takeName(node.creator),
+          ...takeName(node.contributor),
+        ]);
+        if (names.length) authorName = names.join(", ");
       }
 
-      // genre: string | array
-      const g = node.genre;
-      if (genre.length === 0 && g) {
-        genre = normalizeGenreValue(g);
+      if (genre.length === 0) {
+        genre = normalizeGenreValue(node.genre);
       }
 
-      // 일부는 keywords로 주기도 함
-      const kw = node.keywords;
-      if (genre.length === 0 && kw) {
-        genre = normalizeGenreValue(kw);
+      if (genre.length === 0 && node.keywords) {
+        genre = normalizeGenreValue(node.keywords);
       }
 
       if (authorName || genre.length) break;
@@ -111,6 +117,27 @@ function parseJsonLd($) {
   }
 
   return { authorName, genre };
+}
+
+// ✅ HTML 원문에서 author 키 문자열을 정규식으로 직접 추출
+function parseAuthorByRegex(html) {
+  const patterns = [
+    /"authorName"\s*:\s*"([^"]+)"/,
+    /"writerName"\s*:\s*"([^"]+)"/,
+    /"drawerName"\s*:\s*"([^"]+)"/,
+    /"artistName"\s*:\s*"([^"]+)"/,
+    /"penName"\s*:\s*"([^"]+)"/,
+    /"creatorName"\s*:\s*"([^"]+)"/,
+  ];
+
+  const found = [];
+  for (const re of patterns) {
+    const m = html.match(re);
+    if (m && m[1]) found.push(m[1]);
+  }
+
+  // 중복 제거 + 너무 긴 문자열 제거
+  return uniq(found).filter((s) => s.length <= 40).join(", ");
 }
 
 module.exports = async function handler(req, res) {
@@ -145,23 +172,38 @@ module.exports = async function handler(req, res) {
     // ✅ 1) JSON-LD 우선
     let { authorName, genre } = parseJsonLd($);
 
+    // ✅ 1.5) meta name="author"도 확인
+    if (!authorName) {
+      const metaAuthor =
+        $("meta[name='author']").attr("content")?.trim() ||
+        $("meta[property='book:author']").attr("content")?.trim() ||
+        "";
+      if (metaAuthor) authorName = metaAuthor;
+    }
+
     // ✅ 2) Next.js 데이터 fallback
     if (!authorName || genre.length === 0) {
       const nextData = safeJsonParse($("#__NEXT_DATA__").text() || "");
       if (nextData) {
         if (!authorName) {
           const preferredAuthors = uniq(collectByKeys(nextData, [
-            "authorName","authorsName","writerName","drawerName","artistName","creatorName","penName"
+            "authorName", "writerName", "drawerName", "artistName", "creatorName", "penName"
           ]));
-          authorName = preferredAuthors.join(", ");
+          if (preferredAuthors.length) authorName = preferredAuthors.join(", ");
         }
         if (genre.length === 0) {
           const genreCandidates = uniq(collectByKeys(nextData, [
-            "genreName","categoryName","categoryTitle","tagName","genre"
+            "genreName", "categoryName", "categoryTitle", "tagName", "genre"
           ]));
           genre = genreCandidates.filter(s => s.length <= 20).slice(0, 5);
         }
       }
+    }
+
+    // ✅ 2.5) HTML regex fallback (작가명만이라도 반드시 건지기)
+    if (!authorName) {
+      const regexAuthor = parseAuthorByRegex(html);
+      if (regexAuthor) authorName = regexAuthor;
     }
 
     // ✅ 3) 텍스트 fallback(최후)
@@ -170,9 +212,9 @@ module.exports = async function handler(req, res) {
 
       if (!authorName) {
         const m =
-          bodyText.match(/작가\s*[:：]?\s*([가-힣A-Za-z0-9·._\-, ]{2,30})/) ||
-          bodyText.match(/글\s*[:：]?\s*([가-힣A-Za-z0-9·._\-, ]{2,30})/) ||
-          bodyText.match(/그림\s*[:：]?\s*([가-힣A-Za-z0-9·._\-, ]{2,30})/);
+          bodyText.match(/작가\s*[:：]?\s*([가-힣A-Za-z0-9·._\-, ]{2,40})/) ||
+          bodyText.match(/글\s*[:：]?\s*([가-힣A-Za-z0-9·._\-, ]{2,40})/) ||
+          bodyText.match(/그림\s*[:：]?\s*([가-힣A-Za-z0-9·._\-, ]{2,40})/);
         if (m && m[1]) authorName = m[1].trim();
       }
 
