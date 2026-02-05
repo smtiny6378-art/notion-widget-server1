@@ -10,8 +10,8 @@ module.exports = async function handler(req, res) {
     }
 
     if (url.includes("page.kakao.com")) {
-      // ✅ 새 파일 추가 없이, 기존 함수 파일로 연결
-      const page = require("./searchKakao"); // <- 여기 중요!
+      // ✅ 새 파일 없이 기존 파일로 연결 (임시)
+      const page = require("./searchKakao"); // 또는 "./kakaopage-search"
       return page(req, res);
     }
 
