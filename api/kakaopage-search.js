@@ -148,7 +148,7 @@ module.exports = async function handler(req, res) {
     res.setHeader("Cache-Control", "no-store");
     return res.json({
       ok: true,
-      platform: "카카오페이지",
+      platform: "KAKAO",
       title,
       coverUrl,
       authorName,
