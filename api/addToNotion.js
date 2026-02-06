@@ -53,8 +53,8 @@ function titleFromKakaoUrl(url) {
 
 function inferPlatformFromUrl(url) {
   const u = String(url || "");
-  if (u.includes("webtoon.kakao.com")) return "카카오웹툰";
-  if (u.includes("page.kakao.com")) return "카카오페이지";
+  if (u.includes("webtoon.kakao.com")) return "KAKAO";
+  if (u.includes("page.kakao.com")) return "KAKAO";
   if (u.includes("ridibooks.com")) return "RIDI";
   return "";
 }
@@ -83,6 +83,24 @@ function cleanKeywords(tagsArr){
 // 옵션 자동생성 (원하면 Vercel env NOTION_AUTO_CREATE_OPTIONS=true)
 const AUTO_CREATE_OPTIONS = String(process.env.NOTION_AUTO_CREATE_OPTIONS || "").trim().toLowerCase() === "true";
 
+async function ensureSelectOption(databaseId, dbProps, propName, value) {
+  if (!AUTO_CREATE_OPTIONS) return { added: [] };
+  if (!value) return { added: [] };
+  const prop = dbProps[propName];
+  if (!prop || prop.type !== "select") return { added: [] };
+
+  const existing = prop.select?.options || [];
+  if (existing.some(o => o.name === value)) return { added: [] };
+
+  const newOptions = [...existing.map(o => ({ name: o.name })), { name: value }];
+
+  await withRetry(() => notion.databases.update({
+    database_id: databaseId,
+    properties: { [propName]: { select: { options: newOptions } } },
+  }));
+  return { added: [value] };
+}
+
 async function ensureMultiSelectOptions(databaseId, dbProps, propName, values) {
   if (!AUTO_CREATE_OPTIONS) return { added: [] };
   const arr = normalizeArray(values);
@@ -105,35 +123,15 @@ async function ensureMultiSelectOptions(databaseId, dbProps, propName, values) {
   return { added: need };
 }
 
-async function ensureSelectOption(databaseId, dbProps, propName, value) {
-  if (!AUTO_CREATE_OPTIONS) return { added: [] };
-  if (!value) return { added: [] };
-
-  const prop = dbProps[propName];
-  if (!prop || prop.type !== "select") return { added: [] };
-
-  const existing = prop.select?.options || [];
-  if (existing.some(o => o.name === value)) return { added: [] };
-
-  const newOptions = [...existing.map(o => ({ name: o.name })), { name: value }];
-
-  await withRetry(() => notion.databases.update({
-    database_id: databaseId,
-    properties: { [propName]: { select: { options: newOptions } } },
-  }));
-  return { added: [value] };
-}
-
 /**
- * ✅ 키워드 매핑 핵심:
- * - DB의 Keyword(1/2/3) 옵션 목록을 읽는다
- * - 입력 키워드가 "어느 컬럼 옵션에 존재하는지"로 분류한다
- * - 존재하지 않는 키워드는 기본적으로 버린다 (원하면 AUTO_CREATE_OPTIONS 켜서 생성 가능)
+ * ✅ 키워드 옵션 기반 매칭:
+ * - 입력 키워드가 Keyword(1/2/3)의 옵션에 존재할 때만 해당 컬럼에 저장
+ * - 존재하지 않으면 unknown으로 분류(기본 저장 X)
  */
 function mapKeywordsByExistingOptions(allKeywords, dbProps) {
   const cols = ["Keyword(1)", "Keyword(2)", "Keyword(3)"];
-
   const optionSets = {};
+
   for (const col of cols) {
     const prop = dbProps[col];
     const opts = (prop && prop.type === "multi_select" && prop.multi_select?.options) ? prop.multi_select.options : [];
@@ -154,20 +152,31 @@ function mapKeywordsByExistingOptions(allKeywords, dbProps) {
     if (!placed) result.unknown.push(kw);
   }
 
-  // 중복 제거
-  for (const col of cols) {
-    result[col] = Array.from(new Set(result[col]));
-  }
+  for (const col of cols) result[col] = Array.from(new Set(result[col]));
   result.unknown = Array.from(new Set(result.unknown));
-
   return result;
+}
+
+function getSelectOptionsSet(dbProps, propName) {
+  const prop = dbProps[propName];
+  if (!prop || prop.type !== "select") return new Set();
+  const opts = prop.select?.options || [];
+  return new Set(opts.map(o => o.name));
+}
+
+function pickFirstExistingGenre(arr, genreOptionsSet) {
+  for (const g of arr) {
+    const s = String(g || "").trim();
+    if (!s) continue;
+    if (genreOptionsSet.has(s)) return s;
+  }
+  return "";
 }
 
 // ---------------- core ----------------
 async function createOne(rawItem, ctx) {
-  const { databaseId, props } = ctx;
+  const { databaseId, props, platformOptionsSet, genreOptionsSet } = ctx;
 
-  // ✅ {data:{...}} 또는 그냥 {...}
   const body =
     (rawItem && rawItem.data && typeof rawItem.data === "object") ? rawItem.data :
     (rawItem && typeof rawItem === "object") ? rawItem :
@@ -175,7 +184,6 @@ async function createOne(rawItem, ctx) {
 
   const urlValue = (body?.url ?? body?.link ?? "").toString().trim();
 
-  // ✅ title 후보를 넓게
   let title =
     (body?.title ?? body?.name ?? body?.bookTitle ?? body?.workTitle ?? "").toString().trim();
   if (!title && urlValue) title = titleFromKakaoUrl(urlValue);
@@ -192,17 +200,36 @@ async function createOne(rawItem, ctx) {
 
   const coverUrl = (body?.coverUrl ?? body?.cover ?? "").toString().trim();
 
-  const platformValue =
+  const platformValueRaw =
     (body?.platform ?? "").toString().trim() ||
     inferPlatformFromUrl(urlValue) ||
     "RIDI";
 
+  // ✅ 옵션이 없으면(자동 생성 OFF) Platform은 저장에서 제외해서 실패를 막음
+  let platformValue = platformValueRaw;
+  if (!platformOptionsSet.has(platformValue)) {
+    if (AUTO_CREATE_OPTIONS) {
+      await ensureSelectOption(databaseId, props, "Platform", platformValue);
+      // props는 최신 옵션 반영이 안 됐을 수 있지만, create 시엔 name만 맞으면 됨
+    } else {
+      platformValue = ""; // 저장 생략
+    }
+  }
+
   const authorName = (body?.authorName ?? body?.author ?? "").toString().trim();
   const publisherName = (body?.publisherName ?? body?.publisher ?? "").toString().trim();
-  const genreValue = normalizeArray(body?.genre)[0] || "";
 
-  // ✅ 입력 키워드(평평한 배열) + 혹시 키워드가 분리되어 들어올 경우도 지원
-  // - body.keyword1 / keyword2 / keyword3 같은 형태가 오면 거기도 합쳐줌 (있으면)
+  // ✅ Genre도 옵션이 없으면(자동 생성 OFF) 저장에서 제외해서 실패 방지
+  const genreCandidates = normalizeArray(body?.genre);
+  let genreValue = pickFirstExistingGenre(genreCandidates, genreOptionsSet);
+  if (!genreValue && genreCandidates.length) {
+    const first = String(genreCandidates[0] || "").trim();
+    if (first && AUTO_CREATE_OPTIONS) {
+      await ensureSelectOption(databaseId, props, "Genre", first);
+      genreValue = first;
+    }
+  }
+
   const flatKeywords = cleanKeywords([
     ...normalizeArray(body?.tags ?? body?.keywords),
     ...normalizeArray(body?.keyword1),
@@ -213,21 +240,14 @@ async function createOne(rawItem, ctx) {
   const guideText = normalizeNotionText(body?.guide ?? body?.romanceGuide ?? "");
   const descText = normalizeNotionText(body?.description ?? body?.meta ?? body?.desc ?? body?.summary ?? "");
 
-  // ✅ DB 옵션 기반으로 Keyword(1/2/3) 분류
   const mapped = mapKeywordsByExistingOptions(flatKeywords, props);
   const kw1 = mapped["Keyword(1)"];
   const kw2 = mapped["Keyword(2)"];
   const kw3 = mapped["Keyword(3)"];
   const unknownKeywords = mapped.unknown;
 
-  // ✅ 옵션 자동 생성이 켜져 있으면, unknown을 “어디에도 없으니” 생성할지 결정해야 하는데
-  // 여기서는 안전하게: unknown은 생성/저장하지 않음 (원하면 아래 주석 해제해서 Keyword(1)에 넣도록 변경 가능)
+  // (옵션 자동생성 ON인 경우) 매칭된 키워드만 보강
   if (AUTO_CREATE_OPTIONS) {
-    await ensureSelectOption(databaseId, props, "Platform", platformValue);
-    if (genreValue) await ensureSelectOption(databaseId, props, "Genre", genreValue);
-
-    // existing 옵션에 있는 키워드만 넣는 정책이라, 옵션 생성은 굳이 안 함.
-    // 원하면 unknown을 특정 컬럼에 생성하도록 바꿀 수 있음.
     await ensureMultiSelectOptions(databaseId, props, "Keyword(1)", kw1);
     await ensureMultiSelectOptions(databaseId, props, "Keyword(2)", kw2);
     await ensureMultiSelectOptions(databaseId, props, "Keyword(3)", kw3);
@@ -235,13 +255,15 @@ async function createOne(rawItem, ctx) {
 
   const properties = {
     "제목": { title: [{ type: "text", text: { content: title.slice(0, 2000) } }] },
-    "Platform": platformValue ? { select: { name: platformValue } } : undefined,
-    "URL": urlValue ? { url: urlValue } : undefined,
-    "Author": authorName ? { rich_text: [{ type: "text", text: { content: authorName } }] } : undefined,
-    "Publisher": publisherName ? { rich_text: [{ type: "text", text: { content: publisherName } }] } : undefined,
-    "Genre": genreValue ? { select: { name: genreValue } } : undefined,
-    "가이드": guideText ? { rich_text: [{ type: "text", text: { content: guideText } }] } : undefined,
-    "작품 소개": descText ? { rich_text: [{ type: "text", text: { content: descText } }] } : undefined,
+
+    ...(platformValue ? { "Platform": { select: { name: platformValue } } } : {}),
+    ...(urlValue ? { "URL": { url: urlValue } } : {}),
+    ...(authorName ? { "Author": { rich_text: [{ type: "text", text: { content: authorName } }] } } : {}),
+    ...(publisherName ? { "Publisher": { rich_text: [{ type: "text", text: { content: publisherName } }] } } : {}),
+    ...(genreValue ? { "Genre": { select: { name: genreValue } } } : {}),
+
+    ...(guideText ? { "가이드": { rich_text: [{ type: "text", text: { content: guideText } }] } } : {}),
+    ...(descText ? { "작품 소개": { rich_text: [{ type: "text", text: { content: descText } }] } } : {}),
   };
 
   if (coverUrl) {
@@ -253,10 +275,6 @@ async function createOne(rawItem, ctx) {
   if (kw1.length) properties["Keyword(1)"] = { multi_select: kw1.map(name => ({ name })) };
   if (kw2.length) properties["Keyword(2)"] = { multi_select: kw2.map(name => ({ name })) };
   if (kw3.length) properties["Keyword(3)"] = { multi_select: kw3.map(name => ({ name })) };
-
-  for (const k of Object.keys(properties)) {
-    if (properties[k] === undefined) delete properties[k];
-  }
 
   const created = await withRetry(() =>
     notion.pages.create({
@@ -272,8 +290,10 @@ async function createOne(rawItem, ctx) {
     pageId: created.id,
     usedValues: {
       title,
-      platformValue,
-      genreValue,
+      platformValue: platformValueRaw,
+      platformSaved: !!platformValue,
+      genreCandidates,
+      genreSaved: genreValue || "",
       keywordMatched: kw1.length + kw2.length + kw3.length,
       keywordUnknown: unknownKeywords,
     },
@@ -293,11 +313,15 @@ module.exports = async (req, res) => {
     // ✅ DB 고정
     const databaseId = "2d8229f54c468182b318e9130eaae3e8";
 
-    // DB 스키마(옵션 포함) 읽기
+    // ✅ DB 스키마 + 옵션 읽기
     const db = await withRetry(() => notion.databases.retrieve({ database_id: databaseId }));
     const props = db?.properties || {};
 
-    const ctx = { databaseId, props };
+    // ✅ select 옵션 세트 준비 (없으면 저장 제외해서 실패 방지)
+    const platformOptionsSet = getSelectOptionsSet(props, "Platform");
+    const genreOptionsSet = getSelectOptionsSet(props, "Genre");
+
+    const ctx = { databaseId, props, platformOptionsSet, genreOptionsSet };
 
     const body = safeJsonBody(req);
     const items = Array.isArray(body?.items) ? body.items : null;
@@ -334,9 +358,12 @@ module.exports = async (req, res) => {
 
     return res.status(200).json({ ok: true, mode: "single", pageId: one.pageId, usedValues: one.usedValues });
   } catch (e) {
+    // ✅ 노션이 주는 에러를 최대한 그대로 돌려줘서 원인 파악 쉽게
     return res.status(500).json({
       ok: false,
       error: e?.message || "Unknown error",
+      notionStatus: e?.status || null,
+      notionCode: e?.code || null,
       details: e?.body || null,
     });
   }
