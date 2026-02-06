@@ -85,7 +85,7 @@ function extractAuthorFromCopyright(desc) {
   const m = s.match(/ⓒ\s*([^/]+)\s*\//);
   if (!m || !m[1]) return "";
   // "기준석, 연장점검, 지안" 같은 형태
-  return normalizeSpace(m[1]).replace(/\s*,\s*/g, ",");
+return normalizeSpace(m[1]).replace(/\s*,\s*/g, ", ");
 }
 
 // ✅ 장르 텍스트 추정 (보수적)
