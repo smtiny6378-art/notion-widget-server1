@@ -9,11 +9,6 @@ function uniq(arr) {
   return Array.from(new Set((arr || []).map((x) => String(x || "").trim()).filter(Boolean)));
 }
 
-function titleFromContentId(url) {
-  const m = String(url || "").match(/\/content\/(\d+)/);
-  return m ? m[1] : "";
-}
-
 function stripTitleSuffix(rawTitle) {
   let t = String(rawTitle || "").trim();
   t = t.replace(/\s*\|\s*카카오페이지\s*$/i, "").trim();
@@ -48,23 +43,13 @@ function detectAdult(html, $) {
   return text.includes("19세") || text.includes("성인") || text.includes("청소년 이용불가");
 }
 
-function findFirstViewerUrl(html, $) {
-  const a = $("a[href*='/viewer/']").first().attr("href");
-  if (a) {
-    const href = String(a).trim();
-    if (href.startsWith("http")) return href;
-    if (href.startsWith("/")) return "https://page.kakao.com" + href;
-  }
-
-  const m = String(html || "").match(/https:\/\/page\.kakao\.com\/content\/\d+\/viewer\/\d+/);
-  if (m) return m[0];
-
-  const m2 = String(html || "").match(/\/content\/\d+\/viewer\/\d+/);
-  if (m2) return "https://page.kakao.com" + m2[0];
-
-  return "";
+// ✅ contentId 추출 (page.kakao.com/content/12345)
+function extractContentId(url) {
+  const m = String(url || "").match(/\/content\/(\d+)/);
+  return m ? m[1] : "";
 }
 
+// ✅ body 텍스트에서 "제목 + 작가" 형태를 추정
 function extractAuthorFromTitleLine(pageText, title) {
   const t = normalizeSpace(title);
   if (!t) return "";
@@ -91,12 +76,14 @@ function extractAuthorFromTitleLine(pageText, title) {
   return cut.slice(0, 80);
 }
 
+// ✅ 장르 텍스트 추정 (보수적)
 function extractGenreFromText(pageText) {
   const text = normalizeSpace(pageText);
   if (!text) return [];
 
   const genres = [];
 
+  // 예: "웹툰 드라마" / "웹툰 로맨스 판타지"
   const m = text.match(/웹툰\s*([가-힣A-Za-z·\s]{2,30})/);
   if (m && m[1]) {
     const g = normalizeSpace(m[1])
@@ -108,6 +95,97 @@ function extractGenreFromText(pageText) {
   }
 
   return uniq(genres);
+}
+
+// ✅ 스크립트 안 JSON/텍스트에서 작가/장르 후보를 추가 추출 (있으면만)
+function extractFromScripts(html) {
+  const out = { authorName: "", genre: [] };
+
+  // 작가 후보 키워드들
+  const authorKeys = ["author", "authors", "writer", "writers", "작가", "저자"];
+  const genreKeys = ["genre", "genres", "category", "categories", "장르"];
+
+  // 너무 비싸게 전체 파싱하지 않고 문자열 패턴 기반으로만 가볍게 시도
+  const lower = String(html || "");
+  if (!lower) return out;
+
+  // "작가명":"..." 같은 패턴
+  for (const k of authorKeys) {
+    // JSON 스타일: "author":"NAME" 또는 "authorName":"NAME"
+    const re = new RegExp(`"${k}\\w*"\\s*:\\s*"([^"]{2,80})"`, "i");
+    const m = lower.match(re);
+    if (m && m[1]) {
+      const name = normalizeSpace(m[1]);
+      // 너무 흔한 값(예: "true" 등) 방지
+      if (name && name.length >= 2 && name.length <= 80) {
+        out.authorName = name;
+        break;
+      }
+    }
+  }
+
+  // 장르 후보: "genre":"드라마" / "genres":["드라마","판타지"]
+  for (const k of genreKeys) {
+    // 배열 형태
+    const reArr = new RegExp(`"${k}\\w*"\\s*:\\s*\\[([^\\]]{2,200})\\]`, "i");
+    const mArr = lower.match(reArr);
+    if (mArr && mArr[1]) {
+      // "드라마","판타지" 형태만 대충 분리
+      const picks = mArr[1]
+        .split(",")
+        .map(s => s.replace(/["']/g, "").trim())
+        .filter(Boolean)
+        .filter(s => s.length <= 20);
+      if (picks.length) out.genre = uniq(picks).slice(0, 3);
+      if (out.genre.length) break;
+    }
+
+    // 단일 문자열 형태
+    const reOne = new RegExp(`"${k}\\w*"\\s*:\\s*"([^"]{2,20})"`, "i");
+    const mOne = lower.match(reOne);
+    if (mOne && mOne[1]) {
+      const g = normalizeSpace(mOne[1]);
+      if (g) out.genre = uniq([g]);
+      if (out.genre.length) break;
+    }
+  }
+
+  return out;
+}
+
+// ✅ viewer URL 찾기 강화 (가장 중요!)
+function findViewerUrlStrong(html, $, contentId) {
+  // 0) contentId가 있으면 viewer URL 후보를 직접 생성할 수는 없지만,
+  // viewer id(회차 id)가 필요해서 완전한 생성은 어려움 → 대신 아래 탐색 강화
+
+  // 1) a[href*="/viewer/"] (기본)
+  const a = $("a[href*='/viewer/']").first().attr("href");
+  if (a) {
+    const href = String(a).trim();
+    if (href.startsWith("http")) return href;
+    if (href.startsWith("/")) return "https://page.kakao.com" + href;
+  }
+
+  // 2) html에 박혀있는 절대 viewer 링크
+  const mAbs = String(html || "").match(/https:\/\/page\.kakao\.com\/content\/\d+\/viewer\/\d+/);
+  if (mAbs) return mAbs[0];
+
+  // 3) html에 박혀있는 상대 viewer 링크
+  const mRel = String(html || "").match(/\/content\/\d+\/viewer\/\d+/);
+  if (mRel) return "https://page.kakao.com" + mRel[0];
+
+  // 4) JSON 안에 viewerId(또는 episodeId)가 있는 경우를 찾아 조합
+  // 흔한 키들: firstEpisodeId, firstViewerId, viewerId, episodeId
+  const episodeKeyCandidates = ["firstEpisodeId", "firstViewerId", "viewerId", "episodeId", "episode", "firstEpisode"];
+  for (const k of episodeKeyCandidates) {
+    const re = new RegExp(`"${k}"\\s*:\\s*(\\d{5,})`, "i");
+    const mm = String(html || "").match(re);
+    if (mm && mm[1] && contentId) {
+      return `https://page.kakao.com/content/${contentId}/viewer/${mm[1]}`;
+    }
+  }
+
+  return "";
 }
 
 async function fetchHtml(url) {
@@ -135,7 +213,7 @@ module.exports = async function handler(req, res) {
     const ogImage = pickMeta($, { prop: "og:image" });
 
     const titleBase = stripTitleSuffix(ogTitle) || stripTitleSuffix($("title").text());
-    const title = titleBase || titleFromContentId(url) || "";
+    const title = titleBase || "";
 
     const coverUrl = absolutize(ogImage);
     let desc = (ogDesc || "").trim();
@@ -145,7 +223,14 @@ module.exports = async function handler(req, res) {
     let authorName = extractAuthorFromTitleLine(pageText, title);
     let genre = extractGenreFromText(pageText);
 
-    const viewerUrl = findFirstViewerUrl(html, $);
+    // ✅ 스크립트에서도 한번 보강
+    const fromScripts = extractFromScripts(html);
+    if (!authorName && fromScripts.authorName) authorName = fromScripts.authorName;
+    if (!genre.length && fromScripts.genre?.length) genre = fromScripts.genre;
+
+    // ✅ viewer 보강 (강화)
+    const contentId = extractContentId(url);
+    const viewerUrl = findViewerUrlStrong(html, $, contentId);
     let usedViewer = "";
 
     if (viewerUrl) {
@@ -160,8 +245,18 @@ module.exports = async function handler(req, res) {
         isAdult = detectAdult(vhtml, $v) || isAdult;
 
         const vText = $v("body").text() || "";
-        if (!authorName) authorName = extractAuthorFromTitleLine(vText, title) || extractAuthorFromTitleLine(vText, vTitle);
+        if (!authorName) {
+          authorName =
+            extractAuthorFromTitleLine(vText, title) ||
+            extractAuthorFromTitleLine(vText, vTitle) ||
+            authorName;
+        }
         if (!genre.length) genre = extractGenreFromText(vText);
+
+        // viewer html 스크립트에서도 마지막 보강
+        const fromScripts2 = extractFromScripts(vhtml);
+        if (!authorName && fromScripts2.authorName) authorName = fromScripts2.authorName;
+        if (!genre.length && fromScripts2.genre?.length) genre = fromScripts2.genre;
 
         usedViewer = viewerUrl;
       } catch {
