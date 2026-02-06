@@ -335,8 +335,8 @@ module.exports = async (req, res) => {
   const body = safeJsonBody(req);
 
   try {
-    const databaseId = process.env.NOTION_DB_ID;
-    if (!databaseId) return res.status(500).json({ ok: false, error: "NOTION_DB_ID is missing" });
+    // ✅ 여기서 DB를 "기존에 쓰던 DB"로 고정 (환경변수 무시)
+    const databaseId = "2d8229f54c468182b318e9130eaae3e8";
 
     const db = await withRetry(() => notion.databases.retrieve({ database_id: databaseId }));
     const props = db?.properties || {};
