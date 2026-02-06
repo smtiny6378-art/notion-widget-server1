@@ -1,8 +1,7 @@
-// /api/getKakaoDetail.js  (카카오웹툰) - 조정 버전
+// /api/getKakaoDetail.js  (카카오웹툰) - 안정 버전(되돌리기용)
 // ✅ 목표
-// - 작가명(authorName)은 절대 빈 값이 되지 않게 보장(fallback)
-// - 하지만 "작가: (작품명)", "(장르)", "로맨스 판타지/드라마" 같은 불필요 토큰은 최대한 제거
-// - 역할 데이터(원작/각색/그림)가 있으면 authorName에 덧붙임
+// - authorName이 "안 뜨는" 상황을 피하기 위해 필터를 최소화
+// - 가능하면 원작/각색/그림 제작진을 authorName에 합침
 // - 제목 " | 카카오웹툰" 제거
 const cheerio = require("cheerio");
 
@@ -95,97 +94,23 @@ function findStringArray(objects, keys) {
   return [];
 }
 
-// ----------------- authorName 정리 로직(안전 + fallback) -----------------
-function cleanBaseAuthorMin(s) {
-  // 최소 정리(절대 비우지 않기 위한 최후 fallback용)
-  let t = String(s || "").trim();
-  t = t.replace(/^작가\s*[:：]\s*/g, "");
-  t = t.replace(/\s+/g, " ").trim();
-  return t;
-}
-function stripParens(s) {
-  // 괄호 안 텍스트는 보통 장르/부가정보라 제거
-  return String(s || "").replace(/\([^)]*\)/g, " ").replace(/\s+/g, " ").trim();
-}
-function normKey(s) {
-  return String(s || "")
-    .toLowerCase()
-    .trim()
-    .replace(/\s+/g, "")
-    .replace(/[·:：\-\–—_()［］\[\]{}<>|/\\'"“”‘’.,!?]/g, "");
-}
-function splitPeople(s) {
-  return String(s || "")
-    .replace(/^작가\s*[:：]\s*/g, "")
-    .replace(/^제작\s*[:：]\s*/g, "")
-    .replace(/\s*\|\s*/g, ", ")
-    .replace(/\s*·\s*/g, ", ")
-    .replace(/\s*\/\s*/g, ", ")
-    .split(",")
-    .map((x) => x.trim())
-    .filter(Boolean);
-}
-function isLikelyGenreToken(tok) {
-  const t = String(tok || "").trim();
-  if (!t) return true;
-  const low = t.toLowerCase().replace(/\s+/g, "");
-
-  const genreWords = new Set([
-    "로맨스","로맨스판타지","판타지","드라마","액션","스릴러","공포","미스터리","코미디",
-    "일상","스포츠","무협","학원","bl","gl","성인","19","19세","웹툰","웹소설","연재","완결",
-    "로판"
-  ]);
-  if (genreWords.has(low)) return true;
-  if (/(판타지|로맨스|드라마|액션|무협|스릴러|공포|미스터리|코미디|일상)$/.test(t)) return true;
-  return false;
-}
-function cleanPeopleListSafe(raw, titleForFilter) {
-  // ✅ "너무 세게 걸러서 빈 값"이 되면 안 되므로:
-  // 1) 후보 토큰을 만든다
-  // 2) 제목/장르/라벨 같은 확실한 것만 제거한다
-  // 3) 결과가 비면 -> 빈 배열 반환(상위에서 fallback)
-  const titleKey = normKey(titleForFilter);
-  const tokens = splitPeople(stripParens(raw));
-  const out = [];
-
-  for (const tok0 of tokens) {
-    const tok = tok0.trim();
-    if (!tok) continue;
-
-    const k = normKey(tok);
-    if (!k) continue;
-
-    // 제목과 동일/포함이면 제거(작가에 작품명 붙는 케이스)
-    if (titleKey && (k === titleKey || k.includes(titleKey) || titleKey.includes(k))) continue;
-
-    // 장르 단어 제거
-    if (isLikelyGenreToken(tok)) continue;
-
-    // 라벨만 남은 토큰 제거
-    if (tok === "작가" || tok === "제작" || tok === "작가명") continue;
-
-    // 너무 긴 건 설명문일 확률이 높아 제거(하지만 50자까지는 허용)
-    if (tok.length > 50) continue;
-
-    out.push(tok);
-  }
-  return uniq(out);
-}
-
 function joinPeople(arr) {
   return uniq(arr).join(", ");
 }
 
-function buildAuthorLine({ baseAuthorRaw, title, originalAuthors, adapters, artists }) {
-  const baseMin = cleanBaseAuthorMin(baseAuthorRaw);
+// ✅ 최소 필터: "작가:" 같은 접두어/괄호만 제거하고, 나머지는 최대한 살림
+function cleanBaseAuthor(s) {
+  let t = String(s || "").trim();
+  if (!t) return "";
+  t = t.replace(/^작가\s*[:：]\s*/g, "");
+  t = t.replace(/\([^)]*\)/g, " "); // (장르) 같은 괄호만 제거
+  t = t.replace(/\s+/g, " ").trim();
+  return t;
+}
 
-  // 1) 안전 필터 적용
-  const cleanedList = cleanPeopleListSafe(baseAuthorRaw, title);
-
-  // 2) 결과가 비면 -> 최소 정리 원본으로 fallback
-  const base = cleanedList.length ? joinPeople(cleanedList) : baseMin;
-
+function buildAuthorLine({ baseAuthor, originalAuthors, adapters, artists }) {
   const parts = [];
+  const base = cleanBaseAuthor(baseAuthor);
   if (base) parts.push(base);
 
   const o = uniq(originalAuthors);
@@ -218,7 +143,7 @@ module.exports = async function handler(req, res) {
     const html = await fetchHtml(url);
     const $ = cheerio.load(html);
 
-    // OG
+    // OG 기본
     const ogTitle = pickMeta($, "og:title");
     const ogDesc  = pickMeta($, "og:description");
     const ogImage = absolutize(pickMeta($, "og:image"));
@@ -227,7 +152,7 @@ module.exports = async function handler(req, res) {
     let desc  = normalizeNotionText(ogDesc);
     let coverUrl = ogImage;
 
-    // Next/Apollo 풀
+    // Next/Apollo 데이터 풀
     const nextDataText = $("#__NEXT_DATA__").text() || "";
     const nextData = safeJsonParse(nextDataText);
 
@@ -249,13 +174,11 @@ module.exports = async function handler(req, res) {
     const img2 = findFirstString(pool, ["coverImage", "coverUrl", "thumbnailUrl", "thumbnail", "image", "imageUrl", "poster"]);
     if (!coverUrl && img2) coverUrl = absolutize(img2);
 
-    title = stripWebtoonSuffix(title).trim();
-
-    // base author
-    const baseAuthorRaw =
+    // ✅ 핵심: authorName은 무조건 "있는 것"을 살린다
+    const baseAuthor =
       findFirstString(pool, ["authorName", "author", "writer", "creator", "creators"]) || "";
 
-    // 역할 데이터
+    // 역할 데이터(있으면 뒤에 추가)
     const originalAuthors = [
       ...findStringArray(pool, ["originalAuthor", "originalAuthors", "original", "originalCreators"]),
       ...findStringArray(pool, ["originalWriter", "originalWriters"]),
@@ -271,15 +194,9 @@ module.exports = async function handler(req, res) {
       ...findStringArray(pool, ["illustrator", "illustrators"]),
     ];
 
-    const authorName = buildAuthorLine({
-      baseAuthorRaw,
-      title,
-      originalAuthors,
-      adapters,
-      artists,
-    });
+    const authorName = buildAuthorLine({ baseAuthor, originalAuthors, adapters, artists });
 
-    // 성인
+    // 성인 여부
     const b1 = findFirstBool(pool, ["isAdult", "adult", "is19", "isAdultOnly", "adultOnly"]);
     let isAdult = b1 === null ? false : b1;
     if (!isAdult) isAdult = detectAdultFromText(html) || detectAdultFromText($("body").text());
@@ -288,13 +205,15 @@ module.exports = async function handler(req, res) {
     let genre = findStringArray(pool, ["genre", "genres", "category", "categories"]);
     genre = uniq(genre);
 
+    title = stripWebtoonSuffix(title).trim();
+
     res.setHeader("Cache-Control", "no-store");
     return res.json({
       ok: true,
       platform: "KAKAO",
       title,
       coverUrl,
-      authorName: authorName || cleanBaseAuthorMin(baseAuthorRaw) || "",
+      authorName: authorName || cleanBaseAuthor(baseAuthor) || "",
       publisherName: "",
       genre,
       desc,
