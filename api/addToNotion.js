@@ -110,7 +110,14 @@ function toRichTextParagraphs(value, chunkSize = 2000) {
   const text = normalizeNotionText(value);
   if (!text) return [];
 
-  const paragraphs = text.split(/\n{2,}/g).map((p) => p.trim()).filter(Boolean);
+  // ✅ \n\n가 있으면 그 기준(문단), 없으면 \n 기준으로라도 나누기
+  const hasDouble = text.includes("\n\n");
+  const splitRe = hasDouble ? /\n{2,}/g : /\n+/g;
+
+  const paragraphs = text
+    .split(splitRe)
+    .map((p) => p.trim())
+    .filter(Boolean);
 
   const out = [];
   for (let i = 0; i < paragraphs.length; i++) {
@@ -125,6 +132,7 @@ function toRichTextParagraphs(value, chunkSize = 2000) {
   }
   return out.slice(0, 100);
 }
+
 
 // ✅ title이 비면 URL에서 제목 추출(19세 게이트 대응)
 function titleFromKakaoUrl(url) {
@@ -182,6 +190,23 @@ async function createOne(rawItem, ctx) {
   if (!title && urlValue) title = titleFromKakaoUrl(urlValue);
   if (!title) return { ok: false, error: "title is required" };
 
+// ✅ 제목 정리: " | 카카오웹툰" 제거
+title = title.replace(/\s*\|\s*카카오웹툰\s*$/g, "").trim();
+
+// ✅ 19세 여부 감지(파서가 주는 필드가 다를 수 있어 후보를 넓게)
+const isAdult =
+  body?.isAdult === true ||
+  body?.adult === true ||
+  body?.is19 === true ||
+  String(body?.ageLimit || "").includes("19") ||
+  String(body?.rating || "").includes("19");
+
+// ✅ 19세면 제목에 [19세 완전판] 붙이기(중복 방지)
+if (isAdult && !/^\[19세\s*완전판\]/.test(title)) {
+  title = `[19세 완전판] ${title}`.trim();
+}
+
+  
   const coverUrl = body?.coverUrl?.toString?.().trim?.() || "";
 
   // ✅ 플랫폼: body.platform 우선, 없으면 URL로 추론
@@ -200,7 +225,16 @@ const platformValue =
   const descText = normalizeNotionText(body?.description ?? body?.meta ?? body?.desc ?? "");
 
   const genreValue = genreArr[0] || "";
-  const keywordValues = Array.from(new Set(tagsArr)); // ✅ tags만 사용 (19 자동 추가 ❌)
+const keywordValues = Array.from(new Set(tagsArr))
+  .filter((t) => {
+    const s = String(t || "").trim();
+    const n = s.replace(/\s+/g, "").toLowerCase();
+    // ✅ "19" 관련 태그 제거 (19세 작품이든 아니든 '19 키워드'는 넣지 않음)
+    if (n === "19" || n === "19세" || n.includes("19세")) return false;
+    if (n.includes("미만이용불가") || n.includes("성인")) return false;
+    return true;
+  });
+
 
   // 옵션 ensure(필요한 것만)
   const createdOptions = { platform: [], genre: [], keywords: [] };
