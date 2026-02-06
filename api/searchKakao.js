@@ -265,6 +265,42 @@ module.exports = async function handler(req, res) {
     }
 
     res.setHeader("Cache-Control", "no-store");
+        // ===== debug hints =====
+    let debugHints = undefined;
+    if (req.query.debug) {
+      const src = html;
+
+      // viewer/episode 관련 숫자 힌트 몇 개만 뽑기 (너무 길면 응답 커짐)
+      const viewerAbs = src.match(/https:\/\/page\.kakao\.com\/content\/\d+\/viewer\/\d+/g) || [];
+      const viewerRel = src.match(/\/content\/\d+\/viewer\/\d+/g) || [];
+
+      // episode/viewer id로 보이는 숫자키 패턴들
+      const keyHits = [];
+      const keys = [
+        "firstEpisodeId","firstViewerId","viewerId","episodeId","firstContentEpisodeId",
+        "defaultEpisodeId","representEpisodeId","latestEpisodeId","openingEpisodeId"
+      ];
+      for (const k of keys) {
+        const re = new RegExp(`"${k}"\\s*:\\s*(\\d{5,})`, "ig");
+        let m;
+        while ((m = re.exec(src)) && keyHits.length < 10) {
+          keyHits.push({ key: k, id: m[1] });
+        }
+      }
+
+      // __NEXT_DATA__ 같은 큰 초기데이터 존재 여부
+      const hasNext = src.includes("__NEXT_DATA__");
+      const hasApollo = src.includes("apollo") || src.includes("Apollo");
+      const hasEpisodeWord = src.includes("episode") || src.includes("Episode");
+
+      debugHints = {
+        viewerAbs: viewerAbs.slice(0, 3),
+        viewerRel: viewerRel.slice(0, 3),
+        keyHits,
+        flags: { hasNext, hasApollo, hasEpisodeWord },
+      };
+    }
+
     return res.json({
       ok: true,
       platform: "카카오페이지",
@@ -275,7 +311,7 @@ module.exports = async function handler(req, res) {
       desc,
       isAdult,
       url,
-      ...(req.query.debug ? { usedViewer } : {}),
+      ...(req.query.debug ? { usedViewer, debugHints } : {}),
     });
   } catch (e) {
     return res.status(500).json({ ok: false, error: String(e?.message || e) });
