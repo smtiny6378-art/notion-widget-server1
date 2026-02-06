@@ -43,10 +43,13 @@ function detectAdult(html, $) {
   return text.includes("19세") || text.includes("성인") || text.includes("청소년 이용불가");
 }
 
-// ✅ contentId 추출 (page.kakao.com/content/12345)
 function extractContentId(url) {
   const m = String(url || "").match(/\/content\/(\d+)/);
   return m ? m[1] : "";
+}
+
+function safeJsonParse(s) {
+  try { return JSON.parse(s); } catch { return null; }
 }
 
 // ✅ body 텍스트에서 "제목 + 작가" 형태를 추정
@@ -76,6 +79,15 @@ function extractAuthorFromTitleLine(pageText, title) {
   return cut.slice(0, 80);
 }
 
+// ✅ 소개글 내 "ⓒ ..." 크레딧에서 작가명 후보 추출(최후의 보강)
+function extractAuthorFromCopyright(desc) {
+  const s = String(desc || "");
+  const m = s.match(/ⓒ\s*([^/]+)\s*\//);
+  if (!m || !m[1]) return "";
+  // "기준석, 연장점검, 지안" 같은 형태
+  return normalizeSpace(m[1]).replace(/\s*,\s*/g, ",");
+}
+
 // ✅ 장르 텍스트 추정 (보수적)
 function extractGenreFromText(pageText) {
   const text = normalizeSpace(pageText);
@@ -83,7 +95,6 @@ function extractGenreFromText(pageText) {
 
   const genres = [];
 
-  // 예: "웹툰 드라마" / "웹툰 로맨스 판타지"
   const m = text.match(/웹툰\s*([가-힣A-Za-z·\s]{2,30})/);
   if (m && m[1]) {
     const g = normalizeSpace(m[1])
@@ -97,68 +108,110 @@ function extractGenreFromText(pageText) {
   return uniq(genres);
 }
 
-// ✅ 스크립트 안 JSON/텍스트에서 작가/장르 후보를 추가 추출 (있으면만)
-function extractFromScripts(html) {
+// ✅ 스크립트 안 JSON/텍스트에서 작가/장르 후보를 가볍게 추출
+function extractFromScriptsLoosely(html) {
   const out = { authorName: "", genre: [] };
+  const src = String(html || "");
+  if (!src) return out;
 
-  // 작가 후보 키워드들
-  const authorKeys = ["author", "authors", "writer", "writers", "작가", "저자"];
-  const genreKeys = ["genre", "genres", "category", "categories", "장르"];
-
-  // 너무 비싸게 전체 파싱하지 않고 문자열 패턴 기반으로만 가볍게 시도
-  const lower = String(html || "");
-  if (!lower) return out;
-
-  // "작가명":"..." 같은 패턴
+  const authorKeys = ["author", "authors", "writer", "writers", "authorName"];
   for (const k of authorKeys) {
-    // JSON 스타일: "author":"NAME" 또는 "authorName":"NAME"
-    const re = new RegExp(`"${k}\\w*"\\s*:\\s*"([^"]{2,80})"`, "i");
-    const m = lower.match(re);
+    const re = new RegExp(`"${k}"\\s*:\\s*"([^"]{2,80})"`, "i");
+    const m = src.match(re);
     if (m && m[1]) {
       const name = normalizeSpace(m[1]);
-      // 너무 흔한 값(예: "true" 등) 방지
-      if (name && name.length >= 2 && name.length <= 80) {
-        out.authorName = name;
-        break;
-      }
+      if (name) { out.authorName = name; break; }
     }
   }
 
-  // 장르 후보: "genre":"드라마" / "genres":["드라마","판타지"]
+  const genreKeys = ["genre", "genres", "category", "categories"];
   for (const k of genreKeys) {
-    // 배열 형태
-    const reArr = new RegExp(`"${k}\\w*"\\s*:\\s*\\[([^\\]]{2,200})\\]`, "i");
-    const mArr = lower.match(reArr);
+    const reArr = new RegExp(`"${k}"\\s*:\\s*\\[([^\\]]{2,200})\\]`, "i");
+    const mArr = src.match(reArr);
     if (mArr && mArr[1]) {
-      // "드라마","판타지" 형태만 대충 분리
       const picks = mArr[1]
         .split(",")
         .map(s => s.replace(/["']/g, "").trim())
         .filter(Boolean)
         .filter(s => s.length <= 20);
-      if (picks.length) out.genre = uniq(picks).slice(0, 3);
-      if (out.genre.length) break;
+      if (picks.length) { out.genre = uniq(picks).slice(0, 3); break; }
     }
 
-    // 단일 문자열 형태
-    const reOne = new RegExp(`"${k}\\w*"\\s*:\\s*"([^"]{2,20})"`, "i");
-    const mOne = lower.match(reOne);
+    const reOne = new RegExp(`"${k}"\\s*:\\s*"([^"]{2,20})"`, "i");
+    const mOne = src.match(reOne);
     if (mOne && mOne[1]) {
       const g = normalizeSpace(mOne[1]);
-      if (g) out.genre = uniq([g]);
-      if (out.genre.length) break;
+      if (g) { out.genre = uniq([g]); break; }
     }
   }
 
   return out;
 }
 
-// ✅ viewer URL 찾기 강화 (가장 중요!)
-function findViewerUrlStrong(html, $, contentId) {
-  // 0) contentId가 있으면 viewer URL 후보를 직접 생성할 수는 없지만,
-  // viewer id(회차 id)가 필요해서 완전한 생성은 어려움 → 대신 아래 탐색 강화
+// ✅ __NEXT_DATA__ 추출
+function extractNextDataJson($) {
+  const raw = ($("#__NEXT_DATA__").text() || "").trim();
+  if (!raw) return null;
+  return safeJsonParse(raw);
+}
 
-  // 1) a[href*="/viewer/"] (기본)
+// ✅ __NEXT_DATA__를 재귀 탐색해서 episode/viewer id 후보 찾기
+function findEpisodeIdFromNextData(nextJson) {
+  const results = [];
+  const maxNodes = 30000; // 안전장치
+  let visited = 0;
+
+  const KEY_RE = /(first|represent|opening|default|latest)?\w*(episode|viewer)\w*id/i;
+
+  function walk(node, path = "") {
+    if (!node || visited >= maxNodes) return;
+    visited++;
+
+    if (Array.isArray(node)) {
+      for (let i = 0; i < node.length; i++) walk(node[i], `${path}[${i}]`);
+      return;
+    }
+
+    if (typeof node === "object") {
+      for (const k of Object.keys(node)) {
+        const v = node[k];
+        const p = path ? `${path}.${k}` : k;
+
+        // 숫자 id 후보
+        if (KEY_RE.test(k)) {
+          if (typeof v === "number" && v >= 10000) results.push({ key: k, id: String(v), path: p });
+          if (typeof v === "string" && /^\d{5,}$/.test(v)) results.push({ key: k, id: v, path: p });
+        }
+
+        // 어떤 객체든 계속 탐색
+        walk(v, p);
+        if (visited >= maxNodes) break;
+      }
+    }
+  }
+
+  walk(nextJson);
+
+  if (!results.length) return { id: "", hits: [] };
+
+  // 우선순위: first/opening/default/represent 같은 느낌의 키를 먼저
+  const score = (r) => {
+    const k = r.key.toLowerCase();
+    if (k.includes("first")) return 1;
+    if (k.includes("opening")) return 2;
+    if (k.includes("default")) return 3;
+    if (k.includes("represent")) return 4;
+    if (k.includes("latest")) return 5;
+    return 9;
+  };
+
+  results.sort((a, b) => score(a) - score(b));
+  return { id: results[0].id, hits: results.slice(0, 10) };
+}
+
+// ✅ viewer URL 찾기: 링크 -> regex -> NEXT_DATA episodeId
+function findViewerUrlStrong(html, $, contentId) {
+  // 1) a[href*="/viewer/"]
   const a = $("a[href*='/viewer/']").first().attr("href");
   if (a) {
     const href = String(a).trim();
@@ -166,22 +219,19 @@ function findViewerUrlStrong(html, $, contentId) {
     if (href.startsWith("/")) return "https://page.kakao.com" + href;
   }
 
-  // 2) html에 박혀있는 절대 viewer 링크
+  // 2) html에 박혀있는 viewer 링크
   const mAbs = String(html || "").match(/https:\/\/page\.kakao\.com\/content\/\d+\/viewer\/\d+/);
   if (mAbs) return mAbs[0];
 
-  // 3) html에 박혀있는 상대 viewer 링크
   const mRel = String(html || "").match(/\/content\/\d+\/viewer\/\d+/);
   if (mRel) return "https://page.kakao.com" + mRel[0];
 
-  // 4) JSON 안에 viewerId(또는 episodeId)가 있는 경우를 찾아 조합
-  // 흔한 키들: firstEpisodeId, firstViewerId, viewerId, episodeId
-  const episodeKeyCandidates = ["firstEpisodeId", "firstViewerId", "viewerId", "episodeId", "episode", "firstEpisode"];
-  for (const k of episodeKeyCandidates) {
-    const re = new RegExp(`"${k}"\\s*:\\s*(\\d{5,})`, "i");
-    const mm = String(html || "").match(re);
-    if (mm && mm[1] && contentId) {
-      return `https://page.kakao.com/content/${contentId}/viewer/${mm[1]}`;
+  // 3) __NEXT_DATA__에서 episode/viewer id 찾아 조합
+  if (contentId) {
+    const nextJson = extractNextDataJson($);
+    if (nextJson) {
+      const picked = findEpisodeIdFromNextData(nextJson);
+      if (picked.id) return `https://page.kakao.com/content/${contentId}/viewer/${picked.id}`;
     }
   }
 
@@ -223,15 +273,29 @@ module.exports = async function handler(req, res) {
     let authorName = extractAuthorFromTitleLine(pageText, title);
     let genre = extractGenreFromText(pageText);
 
-    // ✅ 스크립트에서도 한번 보강
-    const fromScripts = extractFromScripts(html);
-    if (!authorName && fromScripts.authorName) authorName = fromScripts.authorName;
-    if (!genre.length && fromScripts.genre?.length) genre = fromScripts.genre;
+    // 스크립트 보강
+    const loose = extractFromScriptsLoosely(html);
+    if (!authorName && loose.authorName) authorName = loose.authorName;
+    if (!genre.length && loose.genre?.length) genre = loose.genre;
 
-    // ✅ viewer 보강 (강화)
+    // viewer 보강 (NEXT_DATA 포함)
     const contentId = extractContentId(url);
     const viewerUrl = findViewerUrlStrong(html, $, contentId);
     let usedViewer = "";
+
+    // debug: NEXT_DATA에서 id 후보가 뭔지 보여주기
+    let debugHints = undefined;
+    if (req.query.debug) {
+      const nextJson = extractNextDataJson($);
+      const picked = nextJson ? findEpisodeIdFromNextData(nextJson) : { id: "", hits: [] };
+      debugHints = {
+        viewerAbs: (String(html || "").match(/https:\/\/page\.kakao\.com\/content\/\d+\/viewer\/\d+/g) || []).slice(0, 3),
+        viewerRel: (String(html || "").match(/\/content\/\d+\/viewer\/\d+/g) || []).slice(0, 3),
+        nextEpisodePicked: picked.id || "",
+        nextEpisodeHits: picked.hits || [],
+        flags: { hasNext: Boolean($("#__NEXT_DATA__").text()), hasEpisodeWord: String(html).includes("episode") || String(html).includes("Episode") },
+      };
+    }
 
     if (viewerUrl) {
       try {
@@ -245,18 +309,12 @@ module.exports = async function handler(req, res) {
         isAdult = detectAdult(vhtml, $v) || isAdult;
 
         const vText = $v("body").text() || "";
-        if (!authorName) {
-          authorName =
-            extractAuthorFromTitleLine(vText, title) ||
-            extractAuthorFromTitleLine(vText, vTitle) ||
-            authorName;
-        }
+        if (!authorName) authorName = extractAuthorFromTitleLine(vText, title) || extractAuthorFromTitleLine(vText, vTitle) || authorName;
         if (!genre.length) genre = extractGenreFromText(vText);
 
-        // viewer html 스크립트에서도 마지막 보강
-        const fromScripts2 = extractFromScripts(vhtml);
-        if (!authorName && fromScripts2.authorName) authorName = fromScripts2.authorName;
-        if (!genre.length && fromScripts2.genre?.length) genre = fromScripts2.genre;
+        const loose2 = extractFromScriptsLoosely(vhtml);
+        if (!authorName && loose2.authorName) authorName = loose2.authorName;
+        if (!genre.length && loose2.genre?.length) genre = loose2.genre;
 
         usedViewer = viewerUrl;
       } catch {
@@ -264,43 +322,13 @@ module.exports = async function handler(req, res) {
       }
     }
 
-    res.setHeader("Cache-Control", "no-store");
-        // ===== debug hints =====
-    let debugHints = undefined;
-    if (req.query.debug) {
-      const src = html;
-
-      // viewer/episode 관련 숫자 힌트 몇 개만 뽑기 (너무 길면 응답 커짐)
-      const viewerAbs = src.match(/https:\/\/page\.kakao\.com\/content\/\d+\/viewer\/\d+/g) || [];
-      const viewerRel = src.match(/\/content\/\d+\/viewer\/\d+/g) || [];
-
-      // episode/viewer id로 보이는 숫자키 패턴들
-      const keyHits = [];
-      const keys = [
-        "firstEpisodeId","firstViewerId","viewerId","episodeId","firstContentEpisodeId",
-        "defaultEpisodeId","representEpisodeId","latestEpisodeId","openingEpisodeId"
-      ];
-      for (const k of keys) {
-        const re = new RegExp(`"${k}"\\s*:\\s*(\\d{5,})`, "ig");
-        let m;
-        while ((m = re.exec(src)) && keyHits.length < 10) {
-          keyHits.push({ key: k, id: m[1] });
-        }
-      }
-
-      // __NEXT_DATA__ 같은 큰 초기데이터 존재 여부
-      const hasNext = src.includes("__NEXT_DATA__");
-      const hasApollo = src.includes("apollo") || src.includes("Apollo");
-      const hasEpisodeWord = src.includes("episode") || src.includes("Episode");
-
-      debugHints = {
-        viewerAbs: viewerAbs.slice(0, 3),
-        viewerRel: viewerRel.slice(0, 3),
-        keyHits,
-        flags: { hasNext, hasApollo, hasEpisodeWord },
-      };
+    // 최후 보강: desc의 ⓒ 크레딧에서 authorName 추출
+    if (!authorName) {
+      const c = extractAuthorFromCopyright(desc);
+      if (c) authorName = c;
     }
 
+    res.setHeader("Cache-Control", "no-store");
     return res.json({
       ok: true,
       platform: "카카오페이지",
