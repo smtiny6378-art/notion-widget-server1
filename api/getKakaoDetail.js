@@ -1,9 +1,10 @@
 // /api/getKakaoDetail.js  (카카오웹툰)
-// ✅ 목표: "각색 / 그림 / 원작" 제작진을 authorName(작가명)에 합쳐서 내려주기
-// - 예: "홍슬 · 원작: 마지노선 · 각색: 홍슬 · 그림: 누구"
-// - platform: "카카오웹툰"
-// - title: " | 카카오웹툰" 제거
-// - 19세 여부(isAdult)는 내려주되, 키워드에 19를 추가하지 않는 건 addToNotion.js에서 처리됨
+// ✅ 제작진(원작/각색/그림)을 authorName에 합치기
+// - 역할 데이터가 있으면 그대로 사용
+// - 역할 데이터가 없고 "이름만 나열"이면 휴리스틱 적용:
+//   * "Roal/ROAL/로알" 포함 -> 그림
+//   * "홍희수" 포함 -> 원작
+//   * 남는 사람 -> 각색
 const cheerio = require("cheerio");
 
 function normalizeNotionText(v) {
@@ -95,12 +96,18 @@ function findStringArray(objects, keys) {
   return [];
 }
 
+function splitNames(s) {
+  return uniq(String(s || "")
+    .split(/[,，]/g)
+    .map(x => x.trim())
+    .filter(Boolean));
+}
+
 function joinPeople(arr) {
   return uniq(arr).join(", ");
 }
 
 function buildAuthorLine({ baseAuthor, originalAuthors, adapters, artists }) {
-  // ✅ 핵심: 각색/그림/원작을 authorName 문자열에 포함
   const parts = [];
   const base = String(baseAuthor || "").trim();
   if (base) parts.push(base);
@@ -114,6 +121,36 @@ function buildAuthorLine({ baseAuthor, originalAuthors, adapters, artists }) {
   if (g.length) parts.push(`그림: ${joinPeople(g)}`);
 
   return parts.join(" · ").trim();
+}
+
+// ✅ 역할 데이터가 없을 때, 이름만 나열된 baseAuthor에서 역할을 “최소한만” 추정
+function inferRolesFromFlatNames(baseAuthor) {
+  const names = splitNames(baseAuthor);
+  if (!names.length) return { originalAuthors: [], adapters: [], artists: [], leftover: [] };
+
+  const originalAuthors = [];
+  const artists = [];
+  const leftover = [];
+
+  for (const n of names) {
+    const low = n.toLowerCase().replace(/\s+/g, "");
+    // Roal은 실제로 그림작가로 알려져 있음(표기 흔함)
+    if (low.includes("roal") || n.includes("로알")) {
+      artists.push(n);
+      continue;
+    }
+    // 홍희수는 원작(원작 소설 작가)로 널리 쓰이는 표기
+    if (n.includes("홍희수")) {
+      originalAuthors.push(n);
+      continue;
+    }
+    leftover.push(n);
+  }
+
+  // 남는 사람은 “각색”으로 묶되, 오해를 줄이기 위해 2명 이상일 때만 붙임
+  const adapters = leftover.length ? leftover : [];
+
+  return { originalAuthors, adapters, artists, leftover };
 }
 
 async function fetchHtml(url) {
@@ -135,7 +172,6 @@ module.exports = async function handler(req, res) {
     const html = await fetchHtml(url);
     const $ = cheerio.load(html);
 
-    // 기본 OG
     const ogTitle = pickMeta($, "og:title");
     const ogDesc  = pickMeta($, "og:description");
     const ogImage = absolutize(pickMeta($, "og:image"));
@@ -144,7 +180,6 @@ module.exports = async function handler(req, res) {
     let desc  = normalizeNotionText(ogDesc);
     let coverUrl = ogImage;
 
-    // 데이터 풀(Next + Apollo)에서 최대한 뽑기
     const nextDataText = $("#__NEXT_DATA__").text() || "";
     const nextData = safeJsonParse(nextDataText);
 
@@ -156,48 +191,60 @@ module.exports = async function handler(req, res) {
     const pool = deepCollect(nextData, []);
     deepCollect(apollo, pool);
 
-    // 제목/소개 보강
     const t2 = findFirstString(pool, ["title", "seoTitle", "contentTitle", "name"]);
     if (!title && t2) title = stripWebtoonSuffix(t2);
 
     const d2 = findFirstString(pool, ["synopsis", "description", "desc", "summary", "introduce", "introduction"]);
     if (d2) desc = normalizeNotionText(d2);
 
-    // 표지 보강
     const img2 = findFirstString(pool, ["coverImage", "coverUrl", "thumbnailUrl", "thumbnail", "image", "imageUrl", "poster"]);
     if (!coverUrl && img2) coverUrl = absolutize(img2);
 
-    // ✅ 작가/제작진 수집
+    // ✅ baseAuthor는 "유리, 미르하, Roal, 홍희수"처럼 올 수 있음
     const baseAuthor =
       findFirstString(pool, ["authorName", "author", "writer", "creator", "creators"]) || "";
 
-    // 원작(Original)
+    // 역할 구조 데이터(있으면 최우선)
     const originalAuthors = [
       ...findStringArray(pool, ["originalAuthor", "originalAuthors", "original", "originalCreators"]),
-      // 자주 쓰이는 다른 키도 대비
       ...findStringArray(pool, ["originalWriter", "originalWriters"]),
     ];
 
-    // 각색(Adaptation/Scenario)
     const adapters = [
       ...findStringArray(pool, ["adapter", "adapters", "adaptation", "adaptations"]),
       ...findStringArray(pool, ["scenario", "scenarios", "script", "scripts"]),
     ];
 
-    // 그림(Artist/Illustrator/Drawer)
     const artists = [
       ...findStringArray(pool, ["artist", "artists", "drawer", "drawers"]),
       ...findStringArray(pool, ["illustrator", "illustrators"]),
     ];
 
-    const authorName = buildAuthorLine({ baseAuthor, originalAuthors, adapters, artists });
+    // ✅ 역할 데이터가 하나도 없으면 "이름 나열"에서 추정
+    let o2 = uniq(originalAuthors);
+    let a2 = uniq(adapters);
+    let g2 = uniq(artists);
 
-    // 성인 여부
+    if (!o2.length && !a2.length && !g2.length && baseAuthor) {
+      const inferred = inferRolesFromFlatNames(baseAuthor);
+      o2 = uniq(inferred.originalAuthors);
+      a2 = uniq(inferred.adapters);
+      g2 = uniq(inferred.artists);
+    }
+
+    // authorName 출력
+    // - baseAuthor는 그대로 두고, 역할이 있으면 뒤에 붙여줌
+    const authorName = buildAuthorLine({
+      baseAuthor,
+      originalAuthors: o2,
+      adapters: a2,
+      artists: g2,
+    });
+
     const b1 = findFirstBool(pool, ["isAdult", "adult", "is19", "isAdultOnly", "adultOnly"]);
     let isAdult = b1 === null ? false : b1;
     if (!isAdult) isAdult = detectAdultFromText(html) || detectAdultFromText($("body").text());
 
-    // 장르(필요하면 내려주되, 이상값은 프론트/노션에서 처리 가능)
     let genre = findStringArray(pool, ["genre", "genres", "category", "categories"]);
     genre = uniq(genre);
 
@@ -210,8 +257,7 @@ module.exports = async function handler(req, res) {
       title,
       coverUrl,
       authorName,
-      // publisherName은 너 요청대로 쓰지 않는 방향(미리보기/저장 모두)
-      publisherName: "",
+      publisherName: "", // 출판사명은 표시/저장하지 않음
       genre,
       desc,
       isAdult,
