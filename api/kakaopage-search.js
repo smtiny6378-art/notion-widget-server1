@@ -1,168 +1,164 @@
-// api/kakaopage-search.js
-// GET /api/kakaopage-search?q=검색어
-// - https로 POST
-// - 브라우저 헤더 흉내
-// - 301/302/303/307/308 리다이렉트 따라감
-// - Location도 detail에 찍어서 디버깅 가능
+// /api/kakaopage-search.js
+const cheerio = require("cheerio");
 
-const https = require("https");
+function normalizeSpace(s) {
+  return String(s || "").replace(/\s+/g, " ").trim();
+}
+function uniq(arr) {
+  return Array.from(new Set((arr || []).map((x) => String(x || "").trim()).filter(Boolean)));
+}
+function stripTitleSuffix(rawTitle) {
+  let t = String(rawTitle || "").trim();
+  t = t.replace(/\s*\|\s*카카오페이지\s*$/i, "").trim();
+  t = t.replace(/\s*-\s*웹툰\s*$/i, "").trim();
+  t = t.replace(/\s*-\s*웹소설\s*$/i, "").trim();
+  t = t.replace(/\s*-\s*책\s*$/i, "").trim();
+  return t;
+}
+function absolutize(u) {
+  if (!u) return "";
+  const s = String(u).trim();
+  if (!s) return "";
+  if (s.startsWith("http")) return s;
+  if (s.startsWith("//")) return "https:" + s;
+  if (s.startsWith("/")) return "https://page.kakao.com" + s;
+  return s;
+}
+function pickMeta($, propOrName) {
+  if (propOrName?.prop) return ($(`meta[property='${propOrName.prop}']`).attr("content") || "").trim();
+  if (propOrName?.name) return ($(`meta[name='${propOrName.name}']`).attr("content") || "").trim();
+  return "";
+}
+function detectAdult(html, $) {
+  const text = `${html}\n${$("body").text()}`.toLowerCase();
+  return text.includes("19세") || text.includes("성인") || text.includes("청소년 이용불가");
+}
+function findFirstViewerUrl(html, $) {
+  const a = $("a[href*='/viewer/']").first().attr("href");
+  if (a) {
+    const href = String(a).trim();
+    if (href.startsWith("http")) return href;
+    if (href.startsWith("/")) return "https://page.kakao.com" + href;
+  }
+  const m = String(html || "").match(/https:\/\/page\.kakao\.com\/content\/\d+\/viewer\/\d+/);
+  if (m) return m[0];
+  const m2 = String(html || "").match(/\/content\/\d+\/viewer\/\d+/);
+  if (m2) return "https://page.kakao.com" + m2[0];
+  return "";
+}
+function extractAuthorFromTitleLine(pageText, title) {
+  const t = normalizeSpace(title);
+  if (!t) return "";
 
-function postJsonFollow(url, payload, maxRedirects = 5) {
-  return new Promise((resolve, reject) => {
-    const data = JSON.stringify(payload);
+  const lines = String(pageText || "")
+    .split("\n")
+    .map((l) => normalizeSpace(l))
+    .filter(Boolean);
 
-    const doRequest = (currentUrl, redirectsLeft) => {
-      const u = new URL(currentUrl);
+  const candidates = lines.filter((l) => l.includes(t)).sort((a, b) => a.length - b.length);
+  if (!candidates.length) return "";
 
-      const req = https.request(
-        {
-          hostname: u.hostname,
-          path: u.pathname + (u.search || ""),
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            "content-length": Buffer.byteLength(data),
+  const line = candidates[0];
+  const idx = line.indexOf(t);
+  const after = normalizeSpace(line.slice(idx + t.length));
 
-            // ✅ 브라우저처럼 보이게 하는 헤더들 (302 방지에 도움)
-            "user-agent":
-              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "accept": "application/json, text/plain, */*",
-            "accept-language": "ko-KR,ko;q=0.9,en-US;q=0.7,en;q=0.6",
-            "origin": "https://page.kakao.com",
-            "referer": "https://page.kakao.com/",
-          },
-        },
-        (res) => {
-          const status = res.statusCode || 0;
-          const location = res.headers && res.headers.location ? String(res.headers.location) : "";
+  if (!after) return "";
+  if (after.includes("웹툰") || after.includes("웹소설") || after.includes("연재")) return "";
 
-          // ✅ 리다이렉트 처리
-          if ([301, 302, 303, 307, 308].includes(status) && location && redirectsLeft > 0) {
-            const nextUrl = new URL(location, currentUrl).toString();
-            return doRequest(nextUrl, redirectsLeft - 1);
-          }
-
-          let body = "";
-          res.setEncoding("utf8");
-          res.on("data", (chunk) => (body += chunk));
-          res.on("end", () => resolve({ status, body, location }));
-        }
-      );
-
-      req.on("error", reject);
-      req.write(data);
-      req.end();
-    };
-
-    doRequest(url, maxRedirects);
-  });
+  const cut = after.split("  ")[0].trim();
+  return cut.slice(0, 80);
+}
+function extractGenreFromText(pageText) {
+  const text = normalizeSpace(pageText);
+  if (!text) return [];
+  const genres = [];
+  const m = text.match(/웹툰\s*([가-힣A-Za-z·\s]{2,30})/);
+  if (m && m[1]) {
+    const g = normalizeSpace(m[1])
+      .split(" ")
+      .map((x) => x.trim())
+      .filter(Boolean)
+      .filter((x) => x !== "리스트" && x !== "구분자" && x !== "연재");
+    genres.push(...g.slice(0, 3));
+  }
+  return uniq(genres);
+}
+function cleanGenre(arr) {
+  const bad = new Set(["를", "을", "이", "가", "은", "는", "의", "에", "에서", "와", "과"]);
+  return (arr || []).map((x) => String(x || "").trim()).filter(Boolean).filter((x) => !bad.has(x));
 }
 
+async function fetchHtml(url) {
+  const headers = {
+    "User-Agent":
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+    "Referer": "https://page.kakao.com/",
+  };
+  const r = await fetch(url, { headers, redirect: "follow" });
+  return await r.text();
+}
+
+// ✅ page.kakao.com/content/64257452 형태를 최대한 그대로 지원
 module.exports = async function handler(req, res) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-
-  if (req.method === "OPTIONS") return res.status(204).end();
-  if (req.method !== "GET") return res.status(405).json({ ok: false, error: "Method Not Allowed" });
-
-  const q = (req.query.q || "").toString().trim();
-  if (!q) return res.status(400).json({ ok: false, error: "Missing q" });
-
   try {
-    const url = "https://page.kakao.com/graphql";
+    const url = String(req.query.url || "").trim();
+    if (!url) return res.status(400).json({ ok: false, error: "url required" });
 
-    const query = `
-      query SearchKeyword($input: SearchKeywordInput!) {
-        searchKeyword(searchKeywordInput: $input) {
-          list {
-            id
-            thumbnail
-            row1
-            row2
-            row3 { metaList }
-            ageGrade
-            seriesId
-            scheme
-            eventLog { eventMeta { series_id } }
-          }
-        }
-      }
-    `;
+    const html = await fetchHtml(url);
+    const $ = cheerio.load(html);
 
-    const variables = {
-      input: {
-        page: 1,
-        sortType: "Latest",
-        keyword: q,
-        showOnlyComplete: false
-      }
-    };
+    const ogTitle = pickMeta($, { prop: "og:title" });
+    const ogDesc = pickMeta($, { prop: "og:description" }) || pickMeta($, { name: "description" });
+    const ogImage = pickMeta($, { prop: "og:image" });
 
-    const upstream = await postJsonFollow(url, { query, variables }, 6);
+    const title = stripTitleSuffix(ogTitle) || stripTitleSuffix($("title").text()) || "";
+    const coverUrl = absolutize(ogImage);
+    let desc = (ogDesc || "").trim();
+    let isAdult = detectAdult(html, $);
 
-    // ✅ 200이 아니면, 어디로 리다이렉트 됐는지(location)까지 같이 보여주게 함
-    if (!upstream.status || upstream.status < 200 || upstream.status >= 300) {
-      return res.status(502).json({
-        ok: false,
-        error: "KakaoPage upstream error",
-        status: upstream.status,
-        detail: (upstream.body || "").slice(0, 300),
-        location: upstream.location || ""
-      });
+    const pageText = $("body").text() || "";
+    let authorName = extractAuthorFromTitleLine(pageText, title);
+    let genre = cleanGenre(extractGenreFromText(pageText));
+
+    const viewerUrl = findFirstViewerUrl(html, $);
+    let usedViewer = "";
+
+    if (viewerUrl) {
+      try {
+        const vhtml = await fetchHtml(viewerUrl);
+        const $v = cheerio.load(vhtml);
+
+        const vDesc = pickMeta($v, { prop: "og:description" }) || pickMeta($v, { name: "description" });
+        const vTitle = stripTitleSuffix(pickMeta($v, { prop: "og:title" })) || "";
+
+        if (vDesc && vDesc.length > desc.length) desc = vDesc.trim();
+        isAdult = detectAdult(vhtml, $v) || isAdult;
+
+        const vText = $v("body").text() || "";
+        if (!authorName) authorName = extractAuthorFromTitleLine(vText, title) || extractAuthorFromTitleLine(vText, vTitle);
+        if (!genre.length) genre = cleanGenre(extractGenreFromText(vText));
+
+        usedViewer = viewerUrl;
+      } catch {}
     }
 
-    let data;
-    try {
-      data = JSON.parse(upstream.body);
-    } catch (e) {
-      return res.status(502).json({
-        ok: false,
-        error: "Upstream returned non-JSON",
-        detail: String(upstream.body || "").slice(0, 300),
-      });
-    }
+    genre = cleanGenre(genre);
 
-    const list = data?.data?.searchKeyword?.list || [];
-
-    const detectContentType = (it) => {
-      const meta = []
-        .concat(Array.isArray(it?.row3?.metaList) ? it.row3.metaList : [])
-        .concat(Array.isArray(it?.row2) ? it.row2 : [])
-        .filter(Boolean)
-        .map(v => String(v).toLowerCase());
-
-      const joined = meta.join(" ");
-      if (joined.includes("웹툰") || joined.includes("만화")) return "webtoon";
-      if (joined.includes("웹소설") || joined.includes("소설")) return "novel";
-      return "unknown";
-    };
-
-    const items = list.map((it) => {
-      const seriesId = it?.eventLog?.eventMeta?.series_id || it?.seriesId || it?.id;
-      const title = it?.row1 || "";
-      const row2 = Array.isArray(it?.row2) ? it.row2 : [];
-      const genre = row2[0] || "";
-      const author = row2[1] || "";
-      const link = seriesId ? `https://page.kakao.com/content/${seriesId}` : (it?.scheme || "");
-      const contentType = detectContentType(it);
-
-      return {
-        title,
-        link,
-        coverUrl: it?.thumbnail || "",
-        platform: "카카오페이지",
-        author,
-        genre,
-        ageGrade: it?.ageGrade ?? null,
-        meta: it?.row3?.metaList || [],
-        seriesId: seriesId || "",
-        contentType,
-      };
+    res.setHeader("Cache-Control", "no-store");
+    return res.json({
+      ok: true,
+      platform: "카카오페이지",
+      title,
+      coverUrl,
+      authorName,
+      genre,
+      desc,
+      isAdult,
+      url,
+      ...(req.query.debug ? { usedViewer } : {}),
     });
-
-    return res.status(200).json({ ok: true, q, items });
   } catch (e) {
-    return res.status(500).json({ ok: false, error: e?.message || "Unknown error" });
+    return res.status(500).json({ ok: false, error: String(e?.message || e) });
   }
 };
