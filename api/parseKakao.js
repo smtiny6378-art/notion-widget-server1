@@ -1,5 +1,13 @@
 // api/parseKakao.js
 module.exports = async function handler(req, res) {
+  // ✅ CORS (다른 도메인/노션 임베드에서도 안전)
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+  if (req.method === "OPTIONS") return res.status(200).end();
+  if (req.method !== "GET") return res.status(405).json({ ok: false, error: "Method Not Allowed" });
+
   try {
     const url = String(req.query.url || "").trim();
     if (!url) return res.status(400).json({ ok: false, error: "url required" });
@@ -10,8 +18,7 @@ module.exports = async function handler(req, res) {
     }
 
     if (url.includes("page.kakao.com")) {
-      // ✅ 새 파일 없이 기존 파일로 연결 (임시)
-      const page = require("./searchKakao"); // 또는 "./kakaopage-search"
+      const page = require("./searchKakao"); // 기존 연결 유지
       return page(req, res);
     }
 
