@@ -302,7 +302,7 @@ module.exports = async function handler(req, res) {
     res.setHeader("Cache-Control", "no-store");
     return res.json({
       ok: true,
-      platform: "카카오웹툰",
+      platform: "KAKAO",
       title,
       coverUrl,
       authorName: authorName || "",   // ✅ 이제 불필요 토큰이 섞이지 않도록 정리됨
