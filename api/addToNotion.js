@@ -1,8 +1,45 @@
 // api/addToNotion.js
 const { Client } = require("@notionhq/client");
-const notion = new Client({ auth: process.env.NOTION_TOKEN });
+
+// ✅ Notion SDK 타임아웃 늘리기(기본보다 넉넉하게)
+const notion = new Client({
+  auth: process.env.NOTION_TOKEN,
+  timeoutMs: Number(process.env.NOTION_TIMEOUT_MS || 120000), // 120s
+});
+
+// ✅ (선택) Vercel 함수 최대 실행시간 늘리기 (유료/플랜/환경에 따라 적용)
+// Vercel이 이 config를 지원하는 런타임이면 timeout 완화에 도움이 됨
+module.exports.config = {
+  maxDuration: 60, // seconds
+};
 
 // ---------------- helpers ----------------
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function withRetry(fn, { tries = 3, baseDelay = 400 } = {}) {
+  let lastErr;
+  for (let i = 0; i < tries; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastErr = e;
+      // Notion SDK 타임아웃/5xx/429 등에 한해 재시도하는 느낌으로 넓게 적용
+      const msg = String(e?.message || "");
+      const isRetryable =
+        msg.toLowerCase().includes("timed out") ||
+        msg.toLowerCase().includes("timeout") ||
+        e?.status === 429 ||
+        (e?.status >= 500 && e?.status <= 599);
+
+      if (!isRetryable || i === tries - 1) break;
+
+      const delay = baseDelay * Math.pow(2, i); // 400, 800, 1600...
+      await sleep(delay);
+    }
+  }
+  throw lastErr;
+}
+
 function normalizeArray(v) {
   if (!v) return [];
   if (Array.isArray(v)) return v.map(String).map((s) => s.trim()).filter(Boolean);
@@ -44,73 +81,11 @@ function findPropByNameAndType(props, nameCandidates, typeCandidates) {
   return null;
 }
 
-async function ensureSelectOption(databaseId, dbProps, propName, value) {
-  if (!value) return { added: [] };
-  const prop = dbProps[propName];
-  if (!prop || prop.type !== "select") return { added: [] };
-
-  const existing = prop.select?.options || [];
-  if (existing.some((o) => o.name === value)) return { added: [] };
-
-  const newOptions = [...existing.map((o) => ({ name: o.name })), { name: value }];
-
-  await notion.databases.update({
-    database_id: databaseId,
-    properties: { [propName]: { select: { options: newOptions } } },
-  });
-
-  return { added: [value] };
-}
-
-async function ensureMultiSelectOptions(databaseId, dbProps, propName, values) {
-  const arr = normalizeArray(values);
-  if (!arr.length) return { added: [] };
-
-  const prop = dbProps[propName];
-  if (!prop || prop.type !== "multi_select") return { added: [] };
-
-  const existing = prop.multi_select?.options || [];
-  const existingSet = new Set(existing.map((o) => o.name));
-
-  const need = Array.from(new Set(arr)).filter((v) => v && !existingSet.has(v));
-  if (!need.length) return { added: [] };
-
-  const newOptions = [
-    ...existing.map((o) => ({ name: o.name })),
-    ...need.map((name) => ({ name })),
-  ];
-
-  await notion.databases.update({
-    database_id: databaseId,
-    properties: { [propName]: { multi_select: { options: newOptions } } },
-  });
-
-  return { added: need };
-}
-
-function setSelectValue(props, propName, value) {
-  const prop = props[propName];
-  if (!prop || prop.type !== "select") return null;
-  if (!value) return null;
-  return { select: { name: value } };
-}
-
-function setMultiSelectValue(props, propName, values) {
-  const prop = props[propName];
-  if (!prop || prop.type !== "multi_select") return null;
-
-  const arr = Array.from(new Set(normalizeArray(values)));
-  if (!arr.length) return null;
-
-  return { multi_select: arr.map((name) => ({ name })) };
-}
-
-// ✅ 문단이 나뉘어 보이도록 rich_text 생성
+// ✅ 문단이 나뉘어 보이도록 rich_text 생성 ( \n\n 없으면 \n 기준으로라도 문단 처리 )
 function toRichTextParagraphs(value, chunkSize = 2000) {
   const text = normalizeNotionText(value);
   if (!text) return [];
 
-  // ✅ \n\n가 있으면 그 기준(문단), 없으면 \n 기준으로라도 나누기
   const hasDouble = text.includes("\n\n");
   const splitRe = hasDouble ? /\n{2,}/g : /\n+/g;
 
@@ -133,8 +108,6 @@ function toRichTextParagraphs(value, chunkSize = 2000) {
   return out.slice(0, 100);
 }
 
-
-// ✅ title이 비면 URL에서 제목 추출(19세 게이트 대응)
 function titleFromKakaoUrl(url) {
   try {
     const u = String(url || "").trim();
@@ -151,6 +124,7 @@ function inferPlatformFromUrl(url) {
   const u = String(url || "");
   if (u.includes("webtoon.kakao.com")) return "카카오웹툰";
   if (u.includes("page.kakao.com")) return "카카오페이지";
+  if (u.includes("ridibooks.com")) return "RIDI";
   return "";
 }
 
@@ -160,6 +134,79 @@ function safeJsonBody(req) {
     try { body = JSON.parse(body); } catch {}
   }
   return body || {};
+}
+
+function setSelectValue(props, propName, value) {
+  const prop = props[propName];
+  if (!prop || prop.type !== "select") return null;
+  if (!value) return null;
+  return { select: { name: value } };
+}
+
+function setMultiSelectValue(props, propName, values) {
+  const prop = props[propName];
+  if (!prop || prop.type !== "multi_select") return null;
+
+  const arr = Array.from(new Set(normalizeArray(values)));
+  if (!arr.length) return null;
+
+  return { multi_select: arr.map((name) => ({ name })) };
+}
+
+// ✅ 자동 옵션 생성(=databases.update)은 타임아웃 주범이라 기본 OFF
+const AUTO_CREATE_OPTIONS = String(process.env.NOTION_AUTO_CREATE_OPTIONS || "")
+  .trim()
+  .toLowerCase() === "true";
+
+async function ensureSelectOption(databaseId, dbProps, propName, value) {
+  if (!AUTO_CREATE_OPTIONS) return { added: [] };
+  if (!value) return { added: [] };
+  const prop = dbProps[propName];
+  if (!prop || prop.type !== "select") return { added: [] };
+
+  const existing = prop.select?.options || [];
+  if (existing.some((o) => o.name === value)) return { added: [] };
+
+  const newOptions = [...existing.map((o) => ({ name: o.name })), { name: value }];
+
+  await withRetry(() =>
+    notion.databases.update({
+      database_id: databaseId,
+      properties: { [propName]: { select: { options: newOptions } } },
+    })
+  );
+
+  return { added: [value] };
+}
+
+async function ensureMultiSelectOptions(databaseId, dbProps, propName, values) {
+  if (!AUTO_CREATE_OPTIONS) return { added: [] };
+
+  const arr = normalizeArray(values);
+  if (!arr.length) return { added: [] };
+
+  const prop = dbProps[propName];
+  if (!prop || prop.type !== "multi_select") return { added: [] };
+
+  const existing = prop.multi_select?.options || [];
+  const existingSet = new Set(existing.map((o) => o.name));
+
+  const need = Array.from(new Set(arr)).filter((v) => v && !existingSet.has(v));
+  if (!need.length) return { added: [] };
+
+  const newOptions = [
+    ...existing.map((o) => ({ name: o.name })),
+    ...need.map((name) => ({ name })),
+  ];
+
+  await withRetry(() =>
+    notion.databases.update({
+      database_id: databaseId,
+      properties: { [propName]: { multi_select: { options: newOptions } } },
+    })
+  );
+
+  return { added: need };
 }
 
 // ---------------- core: create one page ----------------
@@ -179,41 +226,38 @@ async function createOne(rawItem, ctx) {
     descProp,
   } = ctx;
 
-  // ✅ fetchParse 결과를 통째로 받는 경우(= {ok:true, ...}) 그대로 사용
-  // 혹시 { data: {...} } 같은 형태면 data 우선
-  const body = (rawItem && rawItem.data && typeof rawItem.data === "object")
-    ? rawItem.data
-    : rawItem;
+  const body =
+    (rawItem && rawItem.data && typeof rawItem.data === "object") ? rawItem.data : rawItem;
 
   const urlValue = (body?.url ?? body?.link)?.toString?.().trim?.() || "";
+
   let title = body?.title?.toString?.().trim?.() || "";
   if (!title && urlValue) title = titleFromKakaoUrl(urlValue);
   if (!title) return { ok: false, error: "title is required" };
 
-// ✅ 제목 정리: " | 카카오웹툰" 제거
-title = title.replace(/\s*\|\s*카카오웹툰\s*$/g, "").trim();
+  // ✅ 제목: "| 카카오웹툰" 제거
+  title = title.replace(/\s*\|\s*카카오웹툰\s*$/g, "").trim();
 
-// ✅ 19세 여부 감지(파서가 주는 필드가 다를 수 있어 후보를 넓게)
-const isAdult =
-  body?.isAdult === true ||
-  body?.adult === true ||
-  body?.is19 === true ||
-  String(body?.ageLimit || "").includes("19") ||
-  String(body?.rating || "").includes("19");
+  // ✅ 19세 감지
+  const isAdult =
+    body?.isAdult === true ||
+    body?.adult === true ||
+    body?.is19 === true ||
+    String(body?.ageLimit || "").includes("19") ||
+    String(body?.rating || "").includes("19");
 
-// ✅ 19세면 제목에 [19세 완전판] 붙이기(중복 방지)
-if (isAdult && !/^\[19세\s*완전판\]/.test(title)) {
-  title = `[19세 완전판] ${title}`.trim();
-}
+  // ✅ 19세면 제목에 [19세 완전판] (중복 방지)
+  if (isAdult && !/^\[19세\s*완전판\]/.test(title)) {
+    title = `[19세 완전판] ${title}`.trim();
+  }
 
-  
   const coverUrl = body?.coverUrl?.toString?.().trim?.() || "";
 
-  // ✅ 플랫폼: body.platform 우선, 없으면 URL로 추론
-const platformValue =
-  (body?.platform?.toString?.().trim?.() || "") ||
-  inferPlatformFromUrl(urlValue) ||
-  "RIDI";
+  // ✅ 플랫폼: body.platform 우선, 없으면 URL 추론, 그래도 없으면 RIDI fallback
+  const platformValue =
+    (body?.platform?.toString?.().trim?.() || "") ||
+    inferPlatformFromUrl(urlValue) ||
+    "RIDI";
 
   const authorName = (body?.authorName ?? body?.author ?? "").toString().trim();
   const publisherName = (body?.publisherName ?? body?.publisher ?? "").toString().trim();
@@ -225,18 +269,18 @@ const platformValue =
   const descText = normalizeNotionText(body?.description ?? body?.meta ?? body?.desc ?? "");
 
   const genreValue = genreArr[0] || "";
-const keywordValues = Array.from(new Set(tagsArr))
-  .filter((t) => {
-    const s = String(t || "").trim();
-    const n = s.replace(/\s+/g, "").toLowerCase();
-    // ✅ "19" 관련 태그 제거 (19세 작품이든 아니든 '19 키워드'는 넣지 않음)
-    if (n === "19" || n === "19세" || n.includes("19세")) return false;
-    if (n.includes("미만이용불가") || n.includes("성인")) return false;
-    return true;
-  });
 
+  // ✅ 19 키워드 자동 추가 X + 19 관련 태그는 제거
+  const keywordValues = Array.from(new Set(tagsArr))
+    .filter((t) => {
+      const s = String(t || "").trim();
+      const n = s.replace(/\s+/g, "").toLowerCase();
+      if (n === "19" || n === "19세" || n.includes("19세")) return false;
+      if (n.includes("미만이용불가") || n.includes("성인") || n.includes("청소년이용불가")) return false;
+      return true;
+    });
 
-  // 옵션 ensure(필요한 것만)
+  // 옵션 ensure (기본 OFF, 필요 시 env로 켜기)
   const createdOptions = { platform: [], genre: [], keywords: [] };
 
   if (platformProp) {
@@ -297,11 +341,14 @@ const keywordValues = Array.from(new Set(tagsArr))
     properties[descProp] = { rich_text: toRichTextParagraphs(descText) };
   }
 
-  const created = await notion.pages.create({
-    parent: { database_id: databaseId },
-    cover: coverUrl ? { type: "external", external: { url: coverUrl } } : undefined,
-    properties,
-  });
+  const created = await withRetry(() =>
+    notion.pages.create({
+      parent: { database_id: databaseId },
+      cover: coverUrl ? { type: "external", external: { url: coverUrl } } : undefined,
+      properties,
+    }),
+    { tries: 3, baseDelay: 500 }
+  );
 
   return {
     ok: true,
@@ -328,8 +375,8 @@ module.exports = async (req, res) => {
     const databaseId = process.env.NOTION_DB_ID;
     if (!databaseId) return res.status(500).json({ ok: false, error: "NOTION_DB_ID is missing" });
 
-    // DB props 한번만 읽기
-    const db = await notion.databases.retrieve({ database_id: databaseId });
+    // DB props 1회
+    const db = await withRetry(() => notion.databases.retrieve({ database_id: databaseId }));
     const props = db?.properties || {};
 
     const titleProp =
@@ -379,7 +426,6 @@ module.exports = async (req, res) => {
       urlProp, guideProp, descProp,
     };
 
-    // ✅ 배치 지원: { items: [...] }
     const items = Array.isArray(body?.items) ? body.items : null;
 
     if (items && items.length) {
@@ -407,11 +453,11 @@ module.exports = async (req, res) => {
         total: results.length,
         okCount,
         failCount,
+        autoCreateOptions: AUTO_CREATE_OPTIONS,
         results,
       });
     }
 
-    // ✅ 단일 지원(기존 호환)
     const one = await createOne(body, ctx);
     if (!one.ok) return res.status(400).json(one);
 
@@ -421,6 +467,7 @@ module.exports = async (req, res) => {
       pageId: one.pageId,
       createdOptions: one.createdOptions,
       usedValues: one.usedValues,
+      autoCreateOptions: AUTO_CREATE_OPTIONS,
     });
   } catch (e) {
     return res.status(500).json({
