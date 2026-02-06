@@ -1,23 +1,20 @@
-// /api/parseKakao.js
+// api/parseKakao.js
 module.exports = async function handler(req, res) {
-  // CORS
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  if (req.method === "OPTIONS") return res.status(200).end();
-  if (req.method !== "GET") return res.status(405).json({ ok: false, error: "Method Not Allowed" });
-
   try {
     const url = String(req.query.url || "").trim();
     if (!url) return res.status(400).json({ ok: false, error: "url required" });
 
+    // 카카오웹툰
     if (url.includes("webtoon.kakao.com")) {
-      const webtoon = require("./getKakaoDetail"); // ✅ 위에서 준 카카오웹툰 파서
+      const webtoon = require("./getKakaoDetail"); // ✅ 카카오웹툰 파서(우리가 쓰는 파일)
       return webtoon(req, res);
     }
 
+    // 카카오페이지
     if (url.includes("page.kakao.com")) {
-      const page = require("./getKakaoPageDetail"); // ✅ 너가 준 카카오페이지 상세 파서
+      // ✅ getKakaoPageDetail 같은 파일은 더 이상 쓰지 않음
+      // ✅ 카카오페이지는 searchKakao.js로 고정
+      const page = require("./searchKakao");
       return page(req, res);
     }
 
