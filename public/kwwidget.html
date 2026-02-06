@@ -3,10 +3,9 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>카카오 → 노션 위젯</title>
+  <title>카카오 → 노션 위젯 (통합)</title>
 
   <style>
-/* ====== CodePen CSS 전부 ====== */
 :root{
   --r: 16px;
   --line:#e6e8ee;
@@ -16,7 +15,6 @@
   --kp:#ffe500; /* kakao page */
   --kw:#facc15; /* kakao webtoon */
   --bg: transparent;
-  --card:#ffffff;
   --shadow: 0 10px 30px rgba(17,24,39,.08);
 
   --ok:#10b981;
@@ -187,9 +185,20 @@ body{
   letter-spacing: -0.02em;
 }
 
+.preview-right{
+  display:flex;
+  align-items:center;
+  gap: 8px;
+}
+
 .preview-meta{
   font-size: 12px;
   color: var(--muted);
+}
+
+.btn.batch{
+  padding: 8px 10px;
+  font-weight: 900;
 }
 
 .cards{
@@ -340,83 +349,98 @@ body{
 </head>
 <body>
 
-  <!-- ====== CodePen HTML 전부 ====== -->
-  <div class="wrap">
-    <div class="outer">
-      <div class="grid">
+<div class="wrap">
+  <div class="outer">
+    <div class="grid">
 
-        <!-- LEFT: KakaoPage -->
-        <section class="panel" data-platform="kakaopage">
-          <header class="head">
-            <div class="brand">
-              <div class="logo kp">K</div>
-              <div class="title">
-                <div class="name">카카오페이지 URL</div>
-                <div class="sub">한 줄에 URL 1개 → 아래 미리보기 자동 생성</div>
-              </div>
-            </div>
-
-            <div class="actions">
-              <button class="btn ghost" data-action="log">로그 보기</button>
-              <button class="btn ghost" data-action="first">첫 URL 열기</button>
-              <button class="btn ghost" data-action="clear">입력 지우기</button>
-            </div>
-          </header>
-
-          <div class="body">
-            <textarea class="ta" placeholder="https://page.kakao.com/content/작품명/12345"></textarea>
-            <div class="preview">
-              <div class="preview-head">
-                <div class="preview-title">미리보기</div>
-                <div class="preview-meta"><span class="count">0</span>개</div>
-              </div>
-              <div class="cards"></div>
+      <!-- LEFT: KakaoPage -->
+      <section class="panel" data-platform="kakaopage">
+        <header class="head">
+          <div class="brand">
+            <div class="logo kp">K</div>
+            <div class="title">
+              <div class="name">카카오페이지 URL</div>
+              <div class="sub">한 줄에 URL 1개 → 아래 카드 미리보기 자동 생성</div>
             </div>
           </div>
 
-          <div class="toast"></div>
-          <pre class="log" hidden></pre>
-        </section>
+          <div class="actions">
+            <button class="btn ghost" data-action="log">로그 보기</button>
+            <button class="btn ghost" data-action="first">첫 URL 열기</button>
+            <button class="btn ghost" data-action="clear">입력 지우기</button>
+          </div>
+        </header>
 
-        <!-- RIGHT: KakaoWebtoon -->
-        <section class="panel" data-platform="kakaowebtoon">
-          <header class="head">
-            <div class="brand">
-              <div class="logo kw">W</div>
-              <div class="title">
-                <div class="name">카카오웹툰 URL</div>
-                <div class="sub">한 줄에 URL 1개 → 아래 미리보기 자동 생성</div>
-              </div>
-            </div>
+        <div class="body">
+          <textarea class="ta" placeholder="https://page.kakao.com/content/64257452 또는 작품 링크를 한 줄씩"></textarea>
 
-            <div class="actions">
-              <button class="btn ghost" data-action="log">로그 보기</button>
-              <button class="btn ghost" data-action="first">첫 URL 열기</button>
-              <button class="btn ghost" data-action="clear">입력 지우기</button>
-            </div>
-          </header>
-
-          <div class="body">
-            <textarea class="ta" placeholder="https://webtoon.kakao.com/content/작품명/1234"></textarea>
-            <div class="preview">
-              <div class="preview-head">
-                <div class="preview-title">미리보기</div>
+          <div class="preview">
+            <div class="preview-head">
+              <div class="preview-title">미리보기</div>
+              <div class="preview-right">
                 <div class="preview-meta"><span class="count">0</span>개</div>
+                <button class="btn ghost batch" data-action="save-all">전체 저장</button>
               </div>
-              <div class="cards"></div>
+            </div>
+            <div class="cards"></div>
+          </div>
+        </div>
+
+        <div class="toast" aria-live="polite"></div>
+        <pre class="log" hidden></pre>
+      </section>
+
+      <!-- RIGHT: KakaoWebtoon -->
+      <section class="panel" data-platform="kakaowebtoon">
+        <header class="head">
+          <div class="brand">
+            <div class="logo kw">W</div>
+            <div class="title">
+              <div class="name">카카오웹툰 URL</div>
+              <div class="sub">한 줄에 URL 1개 → 아래 카드 미리보기 자동 생성</div>
             </div>
           </div>
 
-          <div class="toast"></div>
-          <pre class="log" hidden></pre>
-        </section>
+          <div class="actions">
+            <button class="btn ghost" data-action="log">로그 보기</button>
+            <button class="btn ghost" data-action="first">첫 URL 열기</button>
+            <button class="btn ghost" data-action="clear">입력 지우기</button>
+          </div>
+        </header>
 
-      </div>
+        <div class="body">
+          <textarea class="ta" placeholder="https://webtoon.kakao.com/content/작품명/2873 처럼 한 줄씩"></textarea>
+
+          <div class="preview">
+            <div class="preview-head">
+              <div class="preview-title">미리보기</div>
+              <div class="preview-right">
+                <div class="preview-meta"><span class="count">0</span>개</div>
+                <button class="btn ghost batch" data-action="save-all">전체 저장</button>
+              </div>
+            </div>
+            <div class="cards"></div>
+          </div>
+        </div>
+
+        <div class="toast" aria-live="polite"></div>
+        <pre class="log" hidden></pre>
+      </section>
+
     </div>
   </div>
+</div>
 
-  <!-- ====== CodePen JS 전부 ====== -->
-  <script>
+<script>
+/**
+ * ✅ 이 위젯은 "통째로 복붙" 전용 버전
+ * - 카드 미리보기 자동 생성
+ * - 카드별 저장 + "전체 저장"
+ * - 출판사명은 표시하지 않음(요청사항)
+ * - 19세 제목 표기는 서버(addToNotion)에서 "뒤에 1번만" 정리됨
+ * - 제작진(원작/각색/그림)은 서버(getKakaoDetail)에서 authorName에 합쳐서 내려옴
+ * - 장르의 '를' 같은 찌꺼기는 프론트/서버 양쪽에서 필터
+ */
 const BASE_URL = "https://notion-widget-server1.vercel.app";
 const API_PARSE = "/api/parseKakao";
 const API_ADD   = "/api/addToNotion";
@@ -451,7 +475,7 @@ function showToast(panel, msg){
   panel._toastTimer = setTimeout(() => toast.classList.remove("show"), 2000);
 }
 
-// ✅ 로그는 “에러일 때만” 남김
+// 로그는 에러만
 function appendLog(panel, msg){
   const pre = panel.querySelector(".log");
   pre.hidden = false;
@@ -460,6 +484,14 @@ function appendLog(panel, msg){
 
 function setCount(panel, n){
   panel.querySelector(".count").textContent = String(n);
+}
+
+function cleanGenreArr(arr){
+  const bad = new Set(["를", "을", "이", "가", "은", "는", "의", "에", "에서", "와", "과"]);
+  return (arr || [])
+    .map(x => String(x || "").trim())
+    .filter(Boolean)
+    .filter(x => !bad.has(x));
 }
 
 // ----------------- 캐시 + 동시성 제한 -----------------
@@ -498,6 +530,10 @@ async function fetchParse(url){
     const data = await res.json().catch(() => null);
     if (!res.ok || !data) throw new Error((data && data.error) || "파싱 실패");
     if (!data.ok) throw new Error(data.error || "파싱 실패");
+
+    // 표시용 1차 정리
+    if (Array.isArray(data.genre)) data.genre = cleanGenreArr(data.genre);
+
     parsedCache.set(url, data);
     return data;
   }).finally(() => inflightCache.delete(url));
@@ -539,9 +575,8 @@ function createCard(panel, url){
   const title = el("div", "card-title skeleton");
   title.textContent = "제목 불러오는 중…";
 
-  // ✅ 작가/출판사 표시 라인
   const meta = el("div", "card-author skeleton");
-  meta.textContent = "작가/출판사 불러오는 중…";
+  meta.textContent = "작가 불러오는 중…";
 
   const actions = el("div", "card-actions");
   const pill = el("div", "pill");
@@ -565,30 +600,29 @@ function createCard(panel, url){
   saveBtn.addEventListener("click", async () => {
     const parsed = card._parsed;
     if (!parsed) return;
-
-    saveBtn.disabled = true;
-    const oldText = saveBtn.textContent;
-    saveBtn.textContent = "저장 중…";
-    pill.textContent = "저장 중…";
-    pill.classList.remove("ok", "bad");
-
-    try{
-      await addToNotion([parsed]);
-      pill.textContent = "저장 완료";
-      pill.classList.add("ok");
-      showToast(panel, "노션에 저장했어요!");
-    } catch(err){
-      pill.textContent = "저장 실패";
-      pill.classList.add("bad");
-      appendLog(panel, `✗ 저장 오류: ${err.message}`);
-      showToast(panel, err.message || "노션 저장 실패");
-    } finally{
-      saveBtn.textContent = oldText;
-      saveBtn.disabled = false;
-    }
+    await saveItems(panel, [card], [parsed]);
   });
 
   return card;
+}
+
+function setCardState(card, { status, msg }){
+  const pill = card.querySelector(".pill");
+  pill.classList.remove("ok", "bad");
+
+  if (status === "ready") {
+    pill.textContent = "준비 완료";
+    pill.classList.add("ok");
+  } else if (status === "saving") {
+    pill.textContent = "저장 중…";
+  } else if (status === "saved") {
+    pill.textContent = "저장 완료";
+    pill.classList.add("ok");
+    card.dataset.saved = "1";
+  } else if (status === "fail") {
+    pill.textContent = msg || "실패";
+    pill.classList.add("bad");
+  }
 }
 
 function setCardSuccess(card, parsed){
@@ -596,8 +630,8 @@ function setCardSuccess(card, parsed){
 
   const titleText = parsed.title || "(제목 없음)";
   const authorText = (parsed.authorName || parsed.author || "").toString().trim();
-  const publisherText = (parsed.publisherName || parsed.publisher || "").toString().trim();
 
+  // cover
   const cover = card.querySelector(".cover");
   cover.classList.remove("skeleton");
   cover.innerHTML = "";
@@ -627,17 +661,12 @@ function setCardSuccess(card, parsed){
 
   const meta = card.querySelector(".card-author");
   meta.classList.remove("skeleton");
-  const parts = [];
-  if (authorText) parts.push(`작가: ${authorText}`);
-  if (publisherText) parts.push(`출판사: ${publisherText}`);
-  meta.textContent = parts.length ? parts.join(" · ") : "작가/출판사: (없음)";
-
-  const pill = card.querySelector(".pill");
-  pill.textContent = "준비 완료";
-  pill.classList.add("ok");
+  meta.textContent = authorText ? `작가: ${authorText}` : "작가: (없음)";
 
   const saveBtn = card.querySelector(".btn.mini");
   saveBtn.disabled = false;
+
+  setCardState(card, { status: "ready" });
 }
 
 function setCardError(card, message){
@@ -656,12 +685,66 @@ function setCardError(card, message){
   meta.classList.remove("skeleton");
   meta.textContent = message || "오류가 발생했어요.";
 
-  const pill = card.querySelector(".pill");
-  pill.textContent = "실패";
-  pill.classList.add("bad");
-
   const saveBtn = card.querySelector(".btn.mini");
   saveBtn.disabled = true;
+
+  setCardState(card, { status: "fail", msg: "실패" });
+}
+
+// 공통 저장(단일/일괄)
+async function saveItems(panel, cards, items){
+  const pairs = cards
+    .map((c, i) => ({ card: c, item: items[i] }))
+    .filter(x => x.item && x.card && x.card.dataset.saved !== "1");
+
+  if (!pairs.length) {
+    showToast(panel, "저장할 카드가 없어요.");
+    return;
+  }
+
+  for (const { card } of pairs) {
+    const btn = card.querySelector(".btn.mini");
+    btn.disabled = true;
+    setCardState(card, { status: "saving" });
+  }
+
+  try{
+    const payload = pairs.map(x => x.item);
+    const result = await addToNotion(payload);
+
+    const results = Array.isArray(result?.results) ? result.results : null;
+
+    if (results) {
+      for (let i = 0; i < pairs.length; i++) {
+        const r = results[i];
+        const card = pairs[i].card;
+        const btn = card.querySelector(".btn.mini");
+
+        if (r && r.ok) {
+          setCardState(card, { status: "saved" });
+        } else {
+          setCardState(card, { status: "fail", msg: "저장 실패" });
+          appendLog(panel, `✗ 저장 실패: ${pairs[i].item?.title || "(제목 없음)"}\n  ${(r && r.error) || "Unknown"}`);
+        }
+        btn.disabled = false;
+      }
+    } else {
+      for (const { card } of pairs) {
+        setCardState(card, { status: "saved" });
+        card.querySelector(".btn.mini").disabled = false;
+      }
+    }
+
+    showToast(panel, `${pairs.length}개 저장 완료!`);
+  } catch(err){
+    for (const { card } of pairs) {
+      const btn = card.querySelector(".btn.mini");
+      setCardState(card, { status: "fail", msg: "저장 실패" });
+      btn.disabled = false;
+    }
+    appendLog(panel, `✗ 저장 오류: ${err.message}`);
+    showToast(panel, err.message || "노션 저장 실패");
+  }
 }
 
 function debounce(fn, ms){
@@ -676,6 +759,7 @@ document.querySelectorAll(".panel").forEach(panel => {
   const platform = panel.dataset.platform;
   const ta = panel.querySelector(".ta");
   const cardsWrap = panel.querySelector(".cards");
+
   let renderToken = 0;
 
   function clearCards(){
@@ -732,7 +816,7 @@ document.querySelectorAll(".panel").forEach(panel => {
 
   ta.addEventListener("input", debounce(renderPreviews, DEBOUNCE_MS));
 
-  panel.addEventListener("click", (e) => {
+  panel.addEventListener("click", async (e) => {
     const btn = e.target.closest("button[data-action]");
     if (!btn) return;
 
@@ -758,11 +842,35 @@ document.querySelectorAll(".panel").forEach(panel => {
       showToast(panel, pre.hidden ? "로그를 숨겼어요." : "로그를 열었어요.");
       return;
     }
+
+    if (action === "save-all"){
+      const cards = [...panel.querySelectorAll(".card")];
+      const ready = cards
+        .filter(c => c._parsed)
+        .filter(c => c.dataset.saved !== "1");
+
+      if (!ready.length){
+        showToast(panel, "저장할 카드가 없어요.");
+        return;
+      }
+
+      btn.disabled = true;
+      const old = btn.textContent;
+      btn.textContent = "전체 저장 중…";
+
+      try{
+        const items = ready.map(c => c._parsed);
+        await saveItems(panel, ready, items);
+      } finally{
+        btn.disabled = false;
+        btn.textContent = old;
+      }
+    }
   });
 
   clearCards();
 });
-  </script>
+</script>
 
 </body>
 </html>
