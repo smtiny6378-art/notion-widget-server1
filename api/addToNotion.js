@@ -3,16 +3,6 @@ const { Client } = require("@notionhq/client");
 const notion = new Client({ auth: process.env.NOTION_TOKEN });
 
 // ---------------- helpers ----------------
-function toBoolean(v) {
-  if (typeof v === "boolean") return v;
-  if (typeof v === "number") return v !== 0;
-  if (typeof v === "string") {
-    const s = v.trim().toLowerCase();
-    return s === "true" || s === "1" || s === "y" || s === "yes";
-  }
-  return false;
-}
-
 function normalizeArray(v) {
   if (!v) return [];
   if (Array.isArray(v)) return v.map(String).map((s) => s.trim()).filter(Boolean);
@@ -149,6 +139,13 @@ function titleFromKakaoUrl(url) {
   }
 }
 
+function inferPlatformFromUrl(url) {
+  const u = String(url || "");
+  if (u.includes("webtoon.kakao.com")) return "카카오웹툰";
+  if (u.includes("page.kakao.com")) return "카카오페이지";
+  return "";
+}
+
 function safeJsonBody(req) {
   let body = req.body;
   if (typeof body === "string") {
@@ -158,7 +155,7 @@ function safeJsonBody(req) {
 }
 
 // ---------------- core: create one page ----------------
-async function createOne(body, ctx) {
+async function createOne(rawItem, ctx) {
   const {
     databaseId,
     props,
@@ -174,13 +171,24 @@ async function createOne(body, ctx) {
     descProp,
   } = ctx;
 
+  // ✅ fetchParse 결과를 통째로 받는 경우(= {ok:true, ...}) 그대로 사용
+  // 혹시 { data: {...} } 같은 형태면 data 우선
+  const body = (rawItem && rawItem.data && typeof rawItem.data === "object")
+    ? rawItem.data
+    : rawItem;
+
   const urlValue = (body?.url ?? body?.link)?.toString?.().trim?.() || "";
-  let title = body?.title?.toString().trim() || "";
+  let title = body?.title?.toString?.().trim?.() || "";
   if (!title && urlValue) title = titleFromKakaoUrl(urlValue);
   if (!title) return { ok: false, error: "title is required" };
 
   const coverUrl = body?.coverUrl?.toString?.().trim?.() || "";
-  const platformValue = (body?.platform || "RIDI").toString().trim() || "RIDI";
+
+  // ✅ 플랫폼: body.platform 우선, 없으면 URL로 추론
+const platformValue =
+  (body?.platform?.toString?.().trim?.() || "") ||
+  inferPlatformFromUrl(urlValue) ||
+  "RIDI";
 
   const authorName = (body?.authorName ?? body?.author ?? "").toString().trim();
   const publisherName = (body?.publisherName ?? body?.publisher ?? "").toString().trim();
@@ -192,7 +200,7 @@ async function createOne(body, ctx) {
   const descText = normalizeNotionText(body?.description ?? body?.meta ?? body?.desc ?? "");
 
   const genreValue = genreArr[0] || "";
-  const keywordValues = Array.from(new Set(tagsArr)); // tags만 사용 (19 자동 추가 ❌)
+  const keywordValues = Array.from(new Set(tagsArr)); // ✅ tags만 사용 (19 자동 추가 ❌)
 
   // 옵션 ensure(필요한 것만)
   const createdOptions = { platform: [], genre: [], keywords: [] };
@@ -229,7 +237,6 @@ async function createOne(body, ctx) {
     };
   }
 
-  // ✅ 여기 때문에 "카카오페이지는 최소 / 카카오웹툰은 상세"가 자동 유지됨
   if (authorProp && props[authorProp]?.type === "rich_text" && authorName) {
     properties[authorProp] = { rich_text: toRichTextParagraphs(authorName) };
   }
@@ -288,8 +295,8 @@ module.exports = async (req, res) => {
     if (!databaseId) return res.status(500).json({ ok: false, error: "NOTION_DB_ID is missing" });
 
     // DB props 한번만 읽기
-    let db = await notion.databases.retrieve({ database_id: databaseId });
-    let props = db?.properties || {};
+    const db = await notion.databases.retrieve({ database_id: databaseId });
+    const props = db?.properties || {};
 
     const titleProp =
       findPropByNameAndType(props, ["제목", "title", "name", "이름"], "title") ||
@@ -338,7 +345,7 @@ module.exports = async (req, res) => {
       urlProp, guideProp, descProp,
     };
 
-    // ✅ 배치 지원: { items: [...] } 면 여러 개 저장
+    // ✅ 배치 지원: { items: [...] }
     const items = Array.isArray(body?.items) ? body.items : null;
 
     if (items && items.length) {
