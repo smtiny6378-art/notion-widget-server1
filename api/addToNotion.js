@@ -10,7 +10,9 @@ function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 async function withRetry(fn, { tries = 3, baseDelay = 400 } = {}) {
   let lastErr;
   for (let i = 0; i < tries; i++) {
-    try { return await fn(); } catch (e) {
+    try {
+      return await fn();
+    } catch (e) {
       lastErr = e;
       const msg = String(e?.message || "").toLowerCase();
       const isRetryable =
@@ -25,7 +27,9 @@ async function withRetry(fn, { tries = 3, baseDelay = 400 } = {}) {
 
 function safeJsonBody(req) {
   let body = req.body;
-  if (typeof body === "string") { try { body = JSON.parse(body); } catch {} }
+  if (typeof body === "string") {
+    try { body = JSON.parse(body); } catch {}
+  }
   return body || {};
 }
 
@@ -48,7 +52,9 @@ function titleFromKakaoUrl(url) {
     if (!m) return "";
     const slug = decodeURIComponent(m[1]);
     return slug.replace(/-/g, " ").trim();
-  } catch { return ""; }
+  } catch {
+    return "";
+  }
 }
 
 function inferPlatformFromUrl(url) {
@@ -69,21 +75,19 @@ function stripKakaoSuffixAnd19(title) {
 }
 
 // ✅ 플랫폼별 19세 제목 규칙
-// - 카카오웹툰/카카오페이지: 성인작이면 뒤에 [19세 완전판] 1회 붙임
-// - RIDI: 성인작이어도 절대 붙이지 않음 (항상 순수 제목)
-function applyAdultTitleRule(title, isAdult, platformValue) {
-  const base = stripKakaoSuffixAnd19(title);
+// - 카카오웹툰/카카오페이지: 성인작이면 뒤에 [19세 완전판] 1회
+// - RIDI: 성인작이어도 절대 붙이지 않음
+function applyAdultTitleRule(rawTitle, isAdult, platformValue) {
+  const base = stripKakaoSuffixAnd19(rawTitle);
   const isKakao = platformValue === "카카오웹툰" || platformValue === "카카오페이지";
   const isRidi = platformValue === "RIDI";
-
   if (isKakao && isAdult) return `${base} [19세 완전판]`.trim();
-  if (isRidi) return base; // ✅ RIDI는 항상 붙이지 않음
-  // 기타 플랫폼은 보수적으로: 안 붙임
+  if (isRidi) return base;
   return base;
 }
 
 // ✅ 19 관련 키워드 제거 (# 유무 고려)
-function cleanKeywords(tagsArr){
+function cleanKeywords(tagsArr) {
   return Array.from(new Set(normalizeArray(tagsArr))).filter((t) => {
     const s = String(t || "").trim();
     const n = s.replace(/\s+/g, "").toLowerCase();
@@ -214,7 +218,6 @@ async function createOne(rawItem, ctx) {
 
   const urlValue = (body?.url ?? body?.link ?? "").toString().trim();
 
-  // title 후보 넓게
   let rawTitle = (body?.title ?? body?.name ?? body?.bookTitle ?? body?.workTitle ?? "").toString().trim();
   if (!rawTitle && urlValue) rawTitle = titleFromKakaoUrl(urlValue);
   if (!rawTitle) return { ok: false, error: "title is required", debugKeys: Object.keys(body || {}) };
@@ -232,12 +235,13 @@ async function createOne(rawItem, ctx) {
     (body?.platform ?? "").toString().trim() || inferPlatformFromUrl(urlValue) || "RIDI";
   let platformValue = platformRaw;
 
+  // select 옵션이 없으면 저장에서 제외(자동생성 OFF일 때)
   if (platformValue && !platformOptionsSet.has(platformValue)) {
     if (AUTO_CREATE_OPTIONS) await ensureSelectOption(databaseId, props, "Platform", platformValue);
     else platformValue = "";
   }
 
-  // ✅ 플랫폼이 확정된 뒤에 19세 제목 규칙 적용
+  // ✅ 플랫폼 기준 제목 규칙 적용
   const title = applyAdultTitleRule(rawTitle, isAdult, platformRaw);
 
   const authorName = (body?.authorName ?? body?.author ?? "").toString().trim();
@@ -316,7 +320,6 @@ async function createOne(rawItem, ctx) {
     usedValues: {
       title,
       platformRaw,
-      genreSaved: genreValue || "",
       keywordMatched: kw1.length + kw2.length + kw3.length,
       keywordUnknown: unknownKeywords,
     },
@@ -361,6 +364,7 @@ module.exports = async (req, res) => {
           });
         }
       }
+
       const okCount = results.filter((r) => r.ok).length;
       const failCount = results.length - okCount;
 
@@ -384,24 +388,14 @@ module.exports = async (req, res) => {
       usedValues: one.usedValues,
     });
   } catch (e) {
+    console.error("❌ addToNotion fatal:", e);
     return res.status(500).json({
       ok: false,
       error: e?.message || "Unknown error",
-      notionStatus: e?.status || null,
-      notionCode: e?.code || null,
-      details: e?.body ? JSON.stringify(e.body) : null,
+      status: e?.status || null,
+      code: e?.code || null,
+      body: e?.body || null,
+      stack: e?.stack || null,
     });
   }
 };
-
-} catch (e) {
-  console.error("❌ addToNotion fatal:", e);
-  return res.status(500).json({
-    ok: false,
-    error: e?.message || "Unknown error",
-    status: e?.status || null,
-    code: e?.code || null,
-    body: e?.body || null,
-    stack: e?.stack || null,
-  });
-}
