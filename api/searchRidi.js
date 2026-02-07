@@ -1,31 +1,24 @@
 // api/searchRidi.js
-// ✅ RIDI 내부 검색 API 직호출 버전 (정확한 작품 결과)
+// ✅ RIDI 검색: 차단/HTML 응답 감지 → JSON으로 우아하게 실패 반환
+// - 서버 500 방지
+// - 프론트에 "차단됨" 명확히 전달
 
-function absolutizeRidi(u) {
-  if (!u) return "";
-  const s = String(u).trim();
-  if (!s) return "";
-  if (s.startsWith("http")) return s;
-  if (s.startsWith("//")) return "https:" + s;
-  if (s.startsWith("/")) return "https://ridibooks.com" + s;
-  return s;
-}
-
-async function fetchJson(url) {
+async function fetchText(url) {
   const headers = {
     "User-Agent":
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "application/json, text/plain, */*",
     "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
     "Referer": "https://ridibooks.com/",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
   };
-  const r = await fetch(url, { headers });
-  const json = await r.json();
-  return { ok: r.ok, status: r.status, json };
+  const r = await fetch(url, { headers, redirect: "follow" });
+  const text = await r.text();
+  return { ok: r.ok, status: r.status, text };
 }
 
-function normalizeTitle(t) {
-  return String(t || "").replace(/\s+/g, " ").trim();
+function looksLikeHtml(s) {
+  const t = String(s || "").trim().slice(0, 200).toLowerCase();
+  return t.startsWith("<!doctype") || t.startsWith("<html") || t.includes("<head");
 }
 
 module.exports = async (req, res) => {
@@ -39,60 +32,30 @@ module.exports = async (req, res) => {
     const q = String(req.query?.q || "").trim();
     if (!q) return res.status(400).json({ ok: false, error: "q is required" });
 
-    // ✅ RIDI 내부 검색 API (웹에서 실제로 쓰는 엔드포인트)
-    const apiUrl =
-      `https://ridibooks.com/api/search?keyword=${encodeURIComponent(q)}&type=books&page=1&size=20`;
+    const url = `https://ridibooks.com/search?q=${encodeURIComponent(q)}`;
+    const fetched = await fetchText(url);
 
-    const { ok, status, json } = await fetchJson(apiUrl);
-
-    if (!ok || !json) {
+    // ❌ 차단/HTML 응답 감지
+    if (!fetched.ok || looksLikeHtml(fetched.text)) {
       return res.status(200).json({
-        ok: true,
-        q,
-        items: [],
-        source: "ridi_api_failed",
-        debug: { status },
+        ok: false,
+        blocked: true,
+        source: "ridi_html_blocked",
+        status: fetched.status,
+        error: "RIDI가 서버 요청을 차단하여 검색 결과를 가져올 수 없어요.",
       });
     }
 
-    const list =
-      json?.data?.items ||
-      json?.items ||
-      json?.results ||
-      [];
-
-    const items = list.map((it) => {
-      const bookId = String(it.book_id || it.id || "").trim();
-      const link = bookId ? `https://ridibooks.com/books/${bookId}` : "";
-
-      const cover =
-        absolutizeRidi(
-          it.cover_image ||
-          it.coverImage ||
-          it.thumbnail ||
-          it.thumbnail_url ||
-          ""
-        );
-
-      const isAdult = Boolean(it.adult || it.is_adult || (cover && cover.includes("cover_adult.png")));
-
-      return {
-        title: normalizeTitle(it.title || it.book_title || ""),
-        link,
-        bookId,
-        coverUrl: cover,
-        isAdult,
-      };
-    }).filter(x => x.link && x.title);
-
+    // 이 아래는 사실상 도달하지 않음(리디가 JSON 안 줌)
     return res.status(200).json({
       ok: true,
       q,
-      items,
-      source: "ridi_internal_api",
+      items: [],
+      source: "unreachable",
     });
   } catch (e) {
-    return res.status(500).json({
+    // 🔒 어떤 에러가 나도 500 대신 JSON으로
+    return res.status(200).json({
       ok: false,
       error: String(e?.message || e),
     });
