@@ -3,9 +3,27 @@ import { Client } from "@notionhq/client";
 
 const notion = new Client({ auth: process.env.NOTION_TOKEN });
 
+function setCors(res) {
+  // ridibooks.com 같은 외부 사이트에서 호출하므로 CORS 허용 필요
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+}
+
 export default async function handler(req, res) {
+  setCors(res);
+
+  // ✅ 프리플라이트(OPTIONS) 먼저 처리 (이거 안 하면 Failed to fetch가 자주 뜸)
+  if (req.method === "OPTIONS") {
+    return res.status(204).end();
+  }
+
+  if (req.method !== "POST") {
+    return res.status(405).json({ ok: false, error: "Method Not Allowed" });
+  }
+
   try {
-    const data = req.body;
+    const data = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
 
     const page = await notion.pages.create({
       parent: { database_id: process.env.NOTION_DB_ID },
@@ -33,9 +51,7 @@ export default async function handler(req, res) {
         },
       },
       cover: data.coverUrl
-        ? {
-            external: { url: data.coverUrl },
-          }
+        ? { external: { url: data.coverUrl } }
         : undefined,
       children: [
         {
@@ -59,17 +75,15 @@ export default async function handler(req, res) {
           object: "block",
           type: "paragraph",
           paragraph: {
-            rich_text: [
-              { text: { content: data.romanceGuide || "비어 있음" } },
-            ],
+            rich_text: [{ text: { content: data.romanceGuide || "비어 있음" } }],
           },
         },
       ],
     });
 
-    res.json({ ok: true, pageId: page.id });
+    return res.json({ ok: true, pageId: page.id });
   } catch (e) {
     console.error(e);
-    res.status(500).json({ ok: false, error: e.message });
+    return res.status(500).json({ ok: false, error: e.message });
   }
 }
