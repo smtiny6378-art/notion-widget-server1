@@ -10,16 +10,12 @@ function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 async function withRetry(fn, { tries = 3, baseDelay = 400 } = {}) {
   let lastErr;
   for (let i = 0; i < tries; i++) {
-    try {
-      return await fn();
-    } catch (e) {
+    try { return await fn(); } catch (e) {
       lastErr = e;
       const msg = String(e?.message || "").toLowerCase();
       const isRetryable =
-        msg.includes("timed out") ||
-        msg.includes("timeout") ||
-        e?.status === 429 ||
-        (e?.status >= 500 && e?.status <= 599);
+        msg.includes("timed out") || msg.includes("timeout") ||
+        e?.status === 429 || (e?.status >= 500 && e?.status <= 599);
       if (!isRetryable || i === tries - 1) break;
       await sleep(baseDelay * Math.pow(2, i));
     }
@@ -29,9 +25,7 @@ async function withRetry(fn, { tries = 3, baseDelay = 400 } = {}) {
 
 function safeJsonBody(req) {
   let body = req.body;
-  if (typeof body === "string") {
-    try { body = JSON.parse(body); } catch {}
-  }
+  if (typeof body === "string") { try { body = JSON.parse(body); } catch {} }
   return body || {};
 }
 
@@ -54,9 +48,7 @@ function titleFromKakaoUrl(url) {
     if (!m) return "";
     const slug = decodeURIComponent(m[1]);
     return slug.replace(/-/g, " ").trim();
-  } catch {
-    return "";
-  }
+  } catch { return ""; }
 }
 
 function inferPlatformFromUrl(url) {
@@ -67,25 +59,47 @@ function inferPlatformFromUrl(url) {
   return "";
 }
 
-// ✅ 19세 표기 규칙 유지
-function normalize19TagOnce(title, isAdult) {
+// ✅ 카카오 꼬리표 제거 + 기존 [19세 완전판] 제거(중복 방지)
+function stripKakaoSuffixAnd19(title) {
   let t = String(title || "").trim();
   t = t.replace(/\s*\|\s*카카오웹툰\s*$/g, "").trim();
   t = t.replace(/\[19세\s*완전판\]\s*/g, "").trim();
   t = t.replace(/\s*\[19세\s*완전판\]\s*$/g, "").trim();
-  if (isAdult) t = `${t} [19세 완전판]`.trim();
   return t;
 }
 
-// ✅ 19 관련 키워드 제거
-function cleanKeywords(tagsArr) {
+// ✅ 플랫폼별 19세 제목 규칙
+// - 카카오웹툰/카카오페이지: 성인작이면 뒤에 [19세 완전판] 1회 붙임
+// - RIDI: 성인작이어도 절대 붙이지 않음 (항상 순수 제목)
+function applyAdultTitleRule(title, isAdult, platformValue) {
+  const base = stripKakaoSuffixAnd19(title);
+  const isKakao = platformValue === "카카오웹툰" || platformValue === "카카오페이지";
+  const isRidi = platformValue === "RIDI";
+
+  if (isKakao && isAdult) return `${base} [19세 완전판]`.trim();
+  if (isRidi) return base; // ✅ RIDI는 항상 붙이지 않음
+  // 기타 플랫폼은 보수적으로: 안 붙임
+  return base;
+}
+
+// ✅ 19 관련 키워드 제거 (# 유무 고려)
+function cleanKeywords(tagsArr){
   return Array.from(new Set(normalizeArray(tagsArr))).filter((t) => {
     const s = String(t || "").trim();
     const n = s.replace(/\s+/g, "").toLowerCase();
-    if (n === "19" || n === "19세" || n.includes("19세")) return false;
+    if (n === "19" || n === "#19" || n === "19세" || n === "#19세" || n.includes("19세")) return false;
     if (n.includes("미만이용불가") || n.includes("성인") || n.includes("청소년이용불가")) return false;
     return true;
   });
+}
+
+// ✅ 키워드 비교용 정규화: # 제거 + 공백 제거 + 소문자
+function normKeywordForMatch(s) {
+  return String(s || "")
+    .trim()
+    .replace(/^#+/, "")
+    .replace(/\s+/g, "")
+    .toLowerCase();
 }
 
 // 옵션 자동생성 (원하면 Vercel env NOTION_AUTO_CREATE_OPTIONS=true)
@@ -142,28 +156,39 @@ function getSelectOptionsSet(dbProps, propName) {
 }
 
 /**
- * ✅ 키워드 옵션 기반 매칭:
- * - 입력 키워드가 Keyword(1/2/3)의 옵션에 존재할 때만 해당 컬럼에 저장
+ * ✅ 키워드 옵션 기반 매칭 (# 유무 정규화 지원)
+ * - 저장은 "DB 옵션명 그대로"(# 포함) 저장
  */
 function mapKeywordsByExistingOptions(allKeywords, dbProps) {
   const cols = ["Keyword(1)", "Keyword(2)", "Keyword(3)"];
-  const optionSets = {};
+
+  const colDict = {};
   for (const col of cols) {
     const prop = dbProps[col];
     const opts =
       prop && prop.type === "multi_select" && prop.multi_select?.options
         ? prop.multi_select.options
         : [];
-    optionSets[col] = new Set(opts.map((o) => o.name));
+    const dict = new Map();
+    for (const o of opts) {
+      const actual = o.name;
+      const key = normKeywordForMatch(actual);
+      if (key) dict.set(key, actual);
+    }
+    colDict[col] = dict;
   }
 
   const result = { "Keyword(1)": [], "Keyword(2)": [], "Keyword(3)": [], unknown: [] };
 
   for (const kw of allKeywords) {
+    const nk = normKeywordForMatch(kw);
+    if (!nk) continue;
+
     let placed = false;
     for (const col of cols) {
-      if (optionSets[col].has(kw)) {
-        result[col].push(kw);
+      const actual = colDict[col].get(nk);
+      if (actual) {
+        result[col].push(actual);
         placed = true;
         break;
       }
@@ -189,9 +214,10 @@ async function createOne(rawItem, ctx) {
 
   const urlValue = (body?.url ?? body?.link ?? "").toString().trim();
 
-  let title = (body?.title ?? body?.name ?? body?.bookTitle ?? body?.workTitle ?? "").toString().trim();
-  if (!title && urlValue) title = titleFromKakaoUrl(urlValue);
-  if (!title) return { ok: false, error: "title is required", debugKeys: Object.keys(body || {}) };
+  // title 후보 넓게
+  let rawTitle = (body?.title ?? body?.name ?? body?.bookTitle ?? body?.workTitle ?? "").toString().trim();
+  if (!rawTitle && urlValue) rawTitle = titleFromKakaoUrl(urlValue);
+  if (!rawTitle) return { ok: false, error: "title is required", debugKeys: Object.keys(body || {}) };
 
   const isAdult =
     body?.isAdult === true ||
@@ -200,19 +226,19 @@ async function createOne(rawItem, ctx) {
     String(body?.ageLimit || "").includes("19") ||
     String(body?.rating || "").includes("19");
 
-  title = normalize19TagOnce(title, isAdult);
-
   const coverUrl = (body?.coverUrl ?? body?.cover ?? "").toString().trim();
 
   const platformRaw =
     (body?.platform ?? "").toString().trim() || inferPlatformFromUrl(urlValue) || "RIDI";
   let platformValue = platformRaw;
 
-  // 옵션 없으면 저장에서 제외(자동생성 OFF일 때 실패 방지)
   if (platformValue && !platformOptionsSet.has(platformValue)) {
     if (AUTO_CREATE_OPTIONS) await ensureSelectOption(databaseId, props, "Platform", platformValue);
     else platformValue = "";
   }
+
+  // ✅ 플랫폼이 확정된 뒤에 19세 제목 규칙 적용
+  const title = applyAdultTitleRule(rawTitle, isAdult, platformRaw);
 
   const authorName = (body?.authorName ?? body?.author ?? "").toString().trim();
   const publisherName = (body?.publisherName ?? body?.publisher ?? "").toString().trim();
@@ -253,7 +279,6 @@ async function createOne(rawItem, ctx) {
     await ensureMultiSelectOptions(databaseId, props, "Keyword(3)", kw3);
   }
 
-  // ✅ 여기! 제목 속성 키를 "Title"로 사용 (오류 해결 포인트)
   const properties = {
     "Title": { title: [{ type: "text", text: { content: title.slice(0, 2000) } }] },
 
@@ -291,8 +316,6 @@ async function createOne(rawItem, ctx) {
     usedValues: {
       title,
       platformRaw,
-      platformSaved: !!platformValue,
-      genreCandidates,
       genreSaved: genreValue || "",
       keywordMatched: kw1.length + kw2.length + kw3.length,
       keywordUnknown: unknownKeywords,
@@ -310,10 +333,8 @@ module.exports = async (req, res) => {
   if (req.method !== "POST") return res.status(405).end();
 
   try {
-    // ✅ DB 고정
     const databaseId = "2d8229f54c468182b318e9130eaae3e8";
 
-    // DB 스키마 + 옵션 읽기
     const db = await withRetry(() => notion.databases.retrieve({ database_id: databaseId }));
     const props = db?.properties || {};
 
