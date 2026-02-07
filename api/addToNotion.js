@@ -393,3 +393,15 @@ module.exports = async (req, res) => {
     });
   }
 };
+
+} catch (e) {
+  console.error("❌ addToNotion fatal:", e);
+  return res.status(500).json({
+    ok: false,
+    error: e?.message || "Unknown error",
+    status: e?.status || null,
+    code: e?.code || null,
+    body: e?.body || null,
+    stack: e?.stack || null,
+  });
+}
