@@ -1,11 +1,11 @@
 {
   "name": "notion-widget-server1",
-  "version": "1.0.0",
   "private": true,
-  "engines": {
-    "node": "24.x"
+  "scripts": {
+    "dev": "vercel dev",
+    "build": "echo \"no build\""
   },
   "dependencies": {
-    "cheerio": "^1.0.0-rc.12"
+    "@notionhq/client": "^2.2.15"
   }
 }
