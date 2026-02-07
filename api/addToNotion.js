@@ -1,23 +1,18 @@
 // api/addToNotion.js
-const { Client } = require("@notionhq/client");
-
-const notion = new Client({
-  auth: process.env.NOTION_TOKEN,
-  timeoutMs: Number(process.env.NOTION_TIMEOUT_MS || 120000),
-});
+// ✅ No external dependencies. Uses built-in fetch (Node 18+ / Vercel Node 24 OK)
 
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 async function withRetry(fn, { tries = 3, baseDelay = 400 } = {}) {
   let lastErr;
   for (let i = 0; i < tries; i++) {
-    try {
-      return await fn();
-    } catch (e) {
+    try { return await fn(); }
+    catch (e) {
       lastErr = e;
       const msg = String(e?.message || "").toLowerCase();
+      const status = e?.status || e?.httpStatus || null;
       const isRetryable =
         msg.includes("timed out") || msg.includes("timeout") ||
-        e?.status === 429 || (e?.status >= 500 && e?.status <= 599);
+        status === 429 || (status >= 500 && status <= 599);
       if (!isRetryable || i === tries - 1) break;
       await sleep(baseDelay * Math.pow(2, i));
     }
@@ -52,9 +47,7 @@ function titleFromKakaoUrl(url) {
     if (!m) return "";
     const slug = decodeURIComponent(m[1]);
     return slug.replace(/-/g, " ").trim();
-  } catch {
-    return "";
-  }
+  } catch { return ""; }
 }
 
 function inferPlatformFromUrl(url) {
@@ -65,7 +58,6 @@ function inferPlatformFromUrl(url) {
   return "";
 }
 
-// ✅ 카카오 꼬리표 제거 + 기존 [19세 완전판] 제거(중복 방지)
 function stripKakaoSuffixAnd19(title) {
   let t = String(title || "").trim();
   t = t.replace(/\s*\|\s*카카오웹툰\s*$/g, "").trim();
@@ -74,9 +66,6 @@ function stripKakaoSuffixAnd19(title) {
   return t;
 }
 
-// ✅ 플랫폼별 19세 제목 규칙
-// - 카카오웹툰/카카오페이지: 성인작이면 뒤에 [19세 완전판] 1회
-// - RIDI: 성인작이어도 절대 붙이지 않음
 function applyAdultTitleRule(rawTitle, isAdult, platformValue) {
   const base = stripKakaoSuffixAnd19(rawTitle);
   const isKakao = platformValue === "카카오웹툰" || platformValue === "카카오페이지";
@@ -86,7 +75,6 @@ function applyAdultTitleRule(rawTitle, isAdult, platformValue) {
   return base;
 }
 
-// ✅ 19 관련 키워드 제거 (# 유무 고려)
 function cleanKeywords(tagsArr) {
   return Array.from(new Set(normalizeArray(tagsArr))).filter((t) => {
     const s = String(t || "").trim();
@@ -97,59 +85,12 @@ function cleanKeywords(tagsArr) {
   });
 }
 
-// ✅ 키워드 비교용 정규화: # 제거 + 공백 제거 + 소문자
 function normKeywordForMatch(s) {
   return String(s || "")
     .trim()
     .replace(/^#+/, "")
     .replace(/\s+/g, "")
     .toLowerCase();
-}
-
-// 옵션 자동생성 (원하면 Vercel env NOTION_AUTO_CREATE_OPTIONS=true)
-const AUTO_CREATE_OPTIONS =
-  String(process.env.NOTION_AUTO_CREATE_OPTIONS || "").trim().toLowerCase() === "true";
-
-async function ensureSelectOption(databaseId, dbProps, propName, value) {
-  if (!AUTO_CREATE_OPTIONS) return { added: [] };
-  if (!value) return { added: [] };
-  const prop = dbProps[propName];
-  if (!prop || prop.type !== "select") return { added: [] };
-
-  const existing = prop.select?.options || [];
-  if (existing.some((o) => o.name === value)) return { added: [] };
-
-  const newOptions = [...existing.map((o) => ({ name: o.name })), { name: value }];
-  await withRetry(() =>
-    notion.databases.update({
-      database_id: databaseId,
-      properties: { [propName]: { select: { options: newOptions } } },
-    })
-  );
-  return { added: [value] };
-}
-
-async function ensureMultiSelectOptions(databaseId, dbProps, propName, values) {
-  if (!AUTO_CREATE_OPTIONS) return { added: [] };
-  const arr = normalizeArray(values);
-  if (!arr.length) return { added: [] };
-
-  const prop = dbProps[propName];
-  if (!prop || prop.type !== "multi_select") return { added: [] };
-
-  const existing = prop.multi_select?.options || [];
-  const existingSet = new Set(existing.map((o) => o.name));
-  const need = Array.from(new Set(arr)).filter((v) => v && !existingSet.has(v));
-  if (!need.length) return { added: [] };
-
-  const newOptions = [...existing.map((o) => ({ name: o.name })), ...need.map((name) => ({ name }))];
-  await withRetry(() =>
-    notion.databases.update({
-      database_id: databaseId,
-      properties: { [propName]: { multi_select: { options: newOptions } } },
-    })
-  );
-  return { added: need };
 }
 
 function getSelectOptionsSet(dbProps, propName) {
@@ -159,10 +100,6 @@ function getSelectOptionsSet(dbProps, propName) {
   return new Set(opts.map((o) => o.name));
 }
 
-/**
- * ✅ 키워드 옵션 기반 매칭 (# 유무 정규화 지원)
- * - 저장은 "DB 옵션명 그대로"(# 포함) 저장
- */
 function mapKeywordsByExistingOptions(allKeywords, dbProps) {
   const cols = ["Keyword(1)", "Keyword(2)", "Keyword(3)"];
 
@@ -205,9 +142,32 @@ function mapKeywordsByExistingOptions(allKeywords, dbProps) {
   return result;
 }
 
-// ---------------- core ----------------
+async function notionFetch(path, { method = "POST", token, body } = {}) {
+  const res = await fetch(`https://api.notion.com/v1${path}`, {
+    method,
+    headers: {
+      "Authorization": `Bearer ${token}`,
+      "Notion-Version": "2022-06-28",
+      "Content-Type": "application/json",
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+  const text = await res.text();
+  let json = null;
+  try { json = text ? JSON.parse(text) : null; } catch { json = { raw: text }; }
+
+  if (!res.ok) {
+    const err = new Error(json?.message || `Notion API error (${res.status})`);
+    err.status = res.status;
+    err.body = json;
+    throw err;
+  }
+  return json;
+}
+
 async function createOne(rawItem, ctx) {
-  const { databaseId, props, platformOptionsSet, genreOptionsSet } = ctx;
+  const { databaseId, dbProps, platformOptionsSet, genreOptionsSet } = ctx;
 
   const body =
     rawItem && rawItem.data && typeof rawItem.data === "object"
@@ -233,15 +193,11 @@ async function createOne(rawItem, ctx) {
 
   const platformRaw =
     (body?.platform ?? "").toString().trim() || inferPlatformFromUrl(urlValue) || "RIDI";
+
+  // select 옵션이 없으면 저장에서 제외(실패 방지)
   let platformValue = platformRaw;
+  if (platformValue && !platformOptionsSet.has(platformValue)) platformValue = "";
 
-  // select 옵션이 없으면 저장에서 제외(자동생성 OFF일 때)
-  if (platformValue && !platformOptionsSet.has(platformValue)) {
-    if (AUTO_CREATE_OPTIONS) await ensureSelectOption(databaseId, props, "Platform", platformValue);
-    else platformValue = "";
-  }
-
-  // ✅ 플랫폼 기준 제목 규칙 적용
   const title = applyAdultTitleRule(rawTitle, isAdult, platformRaw);
 
   const authorName = (body?.authorName ?? body?.author ?? "").toString().trim();
@@ -252,13 +208,6 @@ async function createOne(rawItem, ctx) {
   for (const g of genreCandidates) {
     const s = String(g || "").trim();
     if (s && genreOptionsSet.has(s)) { genreValue = s; break; }
-  }
-  if (!genreValue && genreCandidates.length) {
-    const first = String(genreCandidates[0] || "").trim();
-    if (first && AUTO_CREATE_OPTIONS) {
-      await ensureSelectOption(databaseId, props, "Genre", first);
-      genreValue = first;
-    }
   }
 
   const inputKeywords = cleanKeywords([
@@ -271,17 +220,11 @@ async function createOne(rawItem, ctx) {
   const guideText = normalizeNotionText(body?.guide ?? body?.romanceGuide ?? "");
   const descText = normalizeNotionText(body?.description ?? body?.meta ?? body?.desc ?? body?.summary ?? "");
 
-  const mapped = mapKeywordsByExistingOptions(inputKeywords, props);
+  const mapped = mapKeywordsByExistingOptions(inputKeywords, dbProps);
   const kw1 = mapped["Keyword(1)"];
   const kw2 = mapped["Keyword(2)"];
   const kw3 = mapped["Keyword(3)"];
   const unknownKeywords = mapped.unknown;
-
-  if (AUTO_CREATE_OPTIONS) {
-    await ensureMultiSelectOptions(databaseId, props, "Keyword(1)", kw1);
-    await ensureMultiSelectOptions(databaseId, props, "Keyword(2)", kw2);
-    await ensureMultiSelectOptions(databaseId, props, "Keyword(3)", kw3);
-  }
 
   const properties = {
     "Title": { title: [{ type: "text", text: { content: title.slice(0, 2000) } }] },
@@ -307,11 +250,16 @@ async function createOne(rawItem, ctx) {
   if (kw3.length) properties["Keyword(3)"] = { multi_select: kw3.map((name) => ({ name })) };
 
   const created = await withRetry(() =>
-    notion.pages.create({
-      parent: { database_id: databaseId },
-      cover: coverUrl ? { type: "external", external: { url: coverUrl } } : undefined,
-      properties,
-    })
+    notionFetch("/pages", {
+      method: "POST",
+      token: ctx.token,
+      body: {
+        parent: { database_id: databaseId },
+        cover: coverUrl ? { type: "external", external: { url: coverUrl } } : undefined,
+        properties,
+      },
+    }),
+    { tries: 3, baseDelay: 500 }
   );
 
   return {
@@ -336,15 +284,24 @@ module.exports = async (req, res) => {
   if (req.method !== "POST") return res.status(405).end();
 
   try {
+    const token = process.env.NOTION_TOKEN;
+    if (!token) {
+      return res.status(500).json({ ok: false, error: "NOTION_TOKEN is missing" });
+    }
+
+    // ✅ 네 DB 고정
     const databaseId = "2d8229f54c468182b318e9130eaae3e8";
 
-    const db = await withRetry(() => notion.databases.retrieve({ database_id: databaseId }));
-    const props = db?.properties || {};
+    // DB 스키마(옵션 포함) 읽기
+    const db = await withRetry(() =>
+      notionFetch(`/databases/${databaseId}`, { method: "GET", token })
+    );
 
-    const platformOptionsSet = getSelectOptionsSet(props, "Platform");
-    const genreOptionsSet = getSelectOptionsSet(props, "Genre");
+    const dbProps = db?.properties || {};
+    const platformOptionsSet = getSelectOptionsSet(dbProps, "Platform");
+    const genreOptionsSet = getSelectOptionsSet(dbProps, "Genre");
 
-    const ctx = { databaseId, props, platformOptionsSet, genreOptionsSet };
+    const ctx = { token, databaseId, dbProps, platformOptionsSet, genreOptionsSet };
 
     const body = safeJsonBody(req);
     const items = Array.isArray(body?.items) ? body.items : null;
@@ -360,11 +317,11 @@ module.exports = async (req, res) => {
             index: i,
             ok: false,
             error: e?.message || "Unknown error",
-            details: e?.body ? JSON.stringify(e.body) : null,
+            status: e?.status || null,
+            details: e?.body || null,
           });
         }
       }
-
       const okCount = results.filter((r) => r.ok).length;
       const failCount = results.length - okCount;
 
@@ -381,21 +338,13 @@ module.exports = async (req, res) => {
     const one = await createOne(body, ctx);
     if (!one.ok) return res.status(400).json(one);
 
-    return res.status(200).json({
-      ok: true,
-      mode: "single",
-      pageId: one.pageId,
-      usedValues: one.usedValues,
-    });
+    return res.status(200).json({ ok: true, mode: "single", pageId: one.pageId, usedValues: one.usedValues });
   } catch (e) {
-    console.error("❌ addToNotion fatal:", e);
     return res.status(500).json({
       ok: false,
       error: e?.message || "Unknown error",
       status: e?.status || null,
-      code: e?.code || null,
-      body: e?.body || null,
-      stack: e?.stack || null,
+      details: e?.body || null,
     });
   }
 };
