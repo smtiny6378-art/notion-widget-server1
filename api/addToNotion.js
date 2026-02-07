@@ -53,8 +53,8 @@ function titleFromKakaoUrl(url) {
 
 function inferPlatformFromUrl(url) {
   const u = String(url || "");
-  if (u.includes("webtoon.kakao.com")) return "카카오웹툰";
-  if (u.includes("page.kakao.com")) return "카카오페이지";
+  if (u.includes("webtoon.kakao.com")) return "KAKAO";
+  if (u.includes("page.kakao.com")) return "KAKAO";
   if (u.includes("ridibooks.com")) return "RIDI";
   return "";
 }
