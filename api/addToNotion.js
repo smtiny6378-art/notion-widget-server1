@@ -167,7 +167,7 @@ async function notionFetch(path, { method = "POST", token, body } = {}) {
 }
 
 async function createOne(rawItem, ctx) {
-  const { databaseId, dbProps, platformOptionsSet, genreOptionsSet } = ctx;
+  const { databaseId, dbProps, platformOptionsSet, genreOptionsSet, token } = ctx;
 
   const body =
     rawItem && rawItem.data && typeof rawItem.data === "object"
@@ -194,7 +194,6 @@ async function createOne(rawItem, ctx) {
   const platformRaw =
     (body?.platform ?? "").toString().trim() || inferPlatformFromUrl(urlValue) || "RIDI";
 
-  // select 옵션이 없으면 저장에서 제외(실패 방지)
   let platformValue = platformRaw;
   if (platformValue && !platformOptionsSet.has(platformValue)) platformValue = "";
 
@@ -252,7 +251,7 @@ async function createOne(rawItem, ctx) {
   const created = await withRetry(() =>
     notionFetch("/pages", {
       method: "POST",
-      token: ctx.token,
+      token,
       body: {
         parent: { database_id: databaseId },
         cover: coverUrl ? { type: "external", external: { url: coverUrl } } : undefined,
@@ -289,10 +288,12 @@ module.exports = async (req, res) => {
       return res.status(500).json({ ok: false, error: "NOTION_TOKEN is missing" });
     }
 
-    // ✅ 네 DB 고정
-    const databaseId = "2d8229f54c468182b318e9130eaae3e8";
+    // 👉 DB ID는 Vercel 환경변수에서 읽음 (네가 이미 넣어둔 값 사용)
+    const databaseId = process.env.NOTION_DB_ID;
+    if (!databaseId) {
+      return res.status(500).json({ ok: false, error: "NOTION_DB_ID is missing" });
+    }
 
-    // DB 스키마(옵션 포함) 읽기
     const db = await withRetry(() =>
       notionFetch(`/databases/${databaseId}`, { method: "GET", token })
     );
